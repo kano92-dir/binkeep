@@ -1,12 +1,8 @@
-# binkeep
-
-[![binkeep: reverse engineering in your browser](assets/og.png)](https://kano92-dir.github.io/binkeep/)
-
 **Reverse engineering in your browser.** Drop an executable, get a first look in seconds. binkeep is a free, open source binary analysis tool for PE, ELF and Mach-O: disassembler, functions, cross-references, strings, imports, YARA and packer detection. The file is never uploaded, and after the first visit it works offline.
 
 **Try it: https://kano92-dir.github.io/binkeep/**
 
-![binkeep overview of a Windows executable](assets/screenshots/overview.png)
+[![binkeep: reverse engineering in your browser](assets/og.png)](https://kano92-dir.github.io/binkeep/)
 
 It is not a Ghidra replacement. It covers the first part of looking at an unknown binary, without installing anything: malware triage, CTF challenges, checking what a downloaded tool imports, or comparing two builds.
 
