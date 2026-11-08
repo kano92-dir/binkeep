@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- No inline scripts, no third-party scripts, no network calls except the app itself and fonts.
+       'unsafe-eval' is only for libyara-wasm's Emscripten glue (it builds functions with new Function). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' blob: data:; connect-src 'self' data:; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>binkeep: online binary analysis and reverse engineering in your browser</title>
+  <meta name="description" content="binkeep is a free web tool for reverse engineering and malware triage. Open PE (.exe, .dll), ELF and Mach-O files in your browser: disassembler, functions, xrefs, strings, imports, YARA, packer detection and Authenticode. Nothing is uploaded.">
+  <meta name="keywords" content="binkeep, online disassembler, web reverse engineering, reverse engineering in browser, binary analysis, PE viewer, ELF viewer, Mach-O viewer, YARA online, malware analysis, exe analyzer">
+  <link rel="canonical" href="https://kano92-dir.github.io/binkeep/">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="author" content="kano92-dir">
+  <meta name="application-name" content="binkeep">
+  <meta name="apple-mobile-web-app-title" content="binkeep">
+  <meta name="color-scheme" content="dark">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="binkeep">
+  <meta property="og:title" content="binkeep: reverse engineering in your browser">
+  <meta property="og:description" content="Disassembler, functions, xrefs, strings, YARA and packer detection for PE, ELF and Mach-O. Free, offline, nothing is uploaded.">
+  <meta property="og:url" content="https://kano92-dir.github.io/binkeep/">
+  <meta property="og:image" content="https://kano92-dir.github.io/binkeep/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="binkeep logo with the text: reverse engineering in your browser">
+  <meta property="og:locale" content="en_US">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="binkeep: reverse engineering in your browser">
+  <meta name="twitter:description" content="Disassembler, xrefs, strings, YARA and packer detection for PE, ELF and Mach-O. Free, offline, nothing is uploaded.">
+  <meta name="twitter:image" content="https://kano92-dir.github.io/binkeep/assets/og.png">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://kano92-dir.github.io/binkeep/#website",
+        "name": "binkeep",
+        "url": "https://kano92-dir.github.io/binkeep/",
+        "inLanguage": "en"
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://kano92-dir.github.io/binkeep/#app",
+        "name": "binkeep",
+        "alternateName": ["binkeep online disassembler", "binkeep reverse engineering tool"],
+        "url": "https://kano92-dir.github.io/binkeep/",
+        "description": "Free browser-based binary analysis and reverse engineering tool for PE, ELF and Mach-O files: disassembler, functions, cross-references, strings, imports, YARA, packer detection and Authenticode checks. Files never leave the device.",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Reverse engineering",
+        "operatingSystem": "Windows, macOS, Linux, ChromeOS (web browser)",
+        "browserRequirements": "Requires a modern browser with WebAssembly",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "image": "https://kano92-dir.github.io/binkeep/assets/og.png",
+        "screenshot": "https://kano92-dir.github.io/binkeep/assets/screenshots/overview.png",
+        "featureList": ["x86, x64, ARM and ARM64 disassembler", "Function list and cross-references", "Strings and imports", "YARA rules in the browser", "Packer detection (UPX, Themida, VMProtect and more)", "Authenticode digest check", "PE resources, version info and manifest", "Compare two binaries", "Works offline"],
+        "author": { "@type": "Person", "name": "kano92-dir", "url": "https://github.com/kano92-dir" },
+        "isPartOf": { "@id": "https://kano92-dir.github.io/binkeep/#website" },
+        "sameAs": ["https://github.com/kano92-dir/binkeep"]
+      },
+      {
+        "@type": "SoftwareSourceCode",
+        "name": "binkeep",
+        "codeRepository": "https://github.com/kano92-dir/binkeep",
+        "programmingLanguage": "JavaScript",
+        "license": "https://opensource.org/licenses/MIT",
+        "targetProduct": { "@id": "https://kano92-dir.github.io/binkeep/#app" }
+      }
+    ]
+  }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#000000">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <div class="ambient" aria-hidden="true">
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div>
+    <div class="grain"></div>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="binkeep home">
+      <svg class="logo" viewBox="289 373 688 513" aria-hidden="true"><path d="M297 373H824L975 524L876 625L977 726L820 886H324L437 774H774L820 728L774 681H397V722L289 827V583H750L811 522L775 486H410Z"/></svg>
+      <span class="wordmark">binkeep</span>
+    </a>
+    <div class="file-meta" id="fileMeta" hidden>
+      <span class="file-icon" id="fileIcon" hidden></span>
+      <span class="file-name" id="fileName"></span>
+      <span class="chip" id="fileFormat"></span>
+    </div>
+    <div class="actions" id="actions">
+      <button class="btn icon-btn" type="button" id="paletteBtn" title="Search and commands (Ctrl+K)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span class="lbl">Search</span><kbd class="kbd" id="paletteKbd">Ctrl K</kbd>
+      </button>
+      <button class="btn icon-btn report-only" type="button" id="compareBtn" title="Compare with another file" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v18"/><path d="M16 3v18"/><path d="M3 8h5"/><path d="M16 16h5"/></svg>
+        <span class="lbl">Compare</span>
+      </button>
+      <button class="btn icon-btn report-only" type="button" id="shareBtn" title="Copy a share link (the file is not included)" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <span class="lbl">Share</span>
+      </button>
+      <div class="menu-wrap report-only" hidden>
+        <button class="btn icon-btn" type="button" id="exportBtn" aria-haspopup="menu" aria-expanded="false" title="Export report">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span class="lbl">Export</span>
+        </button>
+        <div class="menu" id="exportMenu" role="menu" hidden>
+          <button type="button" role="menuitem" data-export="md">Report as Markdown</button>
+          <button type="button" role="menuitem" data-export="json">Report as JSON</button>
+        </div>
+      </div>
+      <label class="btn btn-primary" for="fileInput">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span class="lbl">Open file</span>
+      </label>
+    </div>
+    <input type="file" id="fileInput" class="visually-hidden">
+    <input type="file" id="compareInput" class="visually-hidden">
+  </header>
+
+  <main id="main">
+    <section class="empty" id="emptyState">
+      <div class="hero">
+        <span class="emblem" aria-hidden="true"><svg viewBox="289 373 688 513"><path d="M297 373H824L975 524L876 625L977 726L820 886H324L437 774H774L820 728L774 681H397V722L289 827V583H750L811 522L775 486H410Z"/></svg></span>
+        <span class="eyebrow"><span class="dot" aria-hidden="true"></span>PE, ELF and Mach-O. 100% in your browser.</span>
+        <h1><span class="grad">See inside any binary.</span></h1>
+        <p>A free online disassembler and binary analysis tool. Drop an executable and get headers, functions, xrefs, strings, YARA matches and disassembly in seconds. Nothing is uploaded.</p>
+      </div>
+      <label class="dropzone" for="fileInput" id="dropzone">
+        <span class="lens" aria-hidden="true"></span>
+        <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></span>
+        <strong>Drop an .exe, .dll, .so, .dylib or any binary</strong>
+        <span>or click to browse. Works offline, with files up to 512 MB.</span>
+      </label>
+      <ul class="pitch">
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+          <span><b>Private by design</b>Parsing, hashing, YARA and disassembly all run in this tab, even offline.</span>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M6 9v3a3 3 0 0 0 3 3h6"/><circle cx="18" cy="6" r="3"/><path d="M18 9v6"/></svg></span>
+          <span><b>Functions and xrefs</b>Every call, jump and string reference, with your own names and comments.</span>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+          <span><b>Packers and signatures</b>Detects UPX, Themida and friends, and checks Authenticode digests.</span>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>
+          <span><b>Real YARA</b>libyara in WebAssembly, with the pe, elf and math modules.</span>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 3v18"/><path d="M16 3v18"/><path d="M3 8h5"/><path d="M16 16h5"/></svg></span>
+          <span><b>Compare two builds</b>See which imports, sections and strings changed between versions.</span>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>
+          <span><b>Share without uploading</b>The report lives inside the link itself. No server ever sees it.</span>
+        </li>
+      </ul>
+      <section class="about" aria-labelledby="aboutTitle">
+        <h2 id="aboutTitle">Reverse engineering in the browser</h2>
+        <p>binkeep is a web-based reverse engineering tool for the first look at an unknown binary. It parses Windows PE files (.exe, .dll, .sys), Linux ELF files (.so and executables) and macOS Mach-O files (including universal binaries) directly in the page, with no install and no upload.</p>
+        <p>It finds functions with a full linear sweep, builds cross-references for calls, jumps, imports and strings, and disassembles x86, x64, ARM and ARM64 code with Capstone compiled to WebAssembly. Real libyara runs your YARA rules locally. It also detects packers such as UPX, Themida and VMProtect, and recomputes Authenticode digests to show whether a signed file was modified.</p>
+        <p>It is free and open source, works offline once loaded, and is built for malware triage, CTF challenges and quick checks before you reach for Ghidra or IDA.</p>
+      </section>
+      <p class="foot"><svg viewBox="289 373 688 513" aria-hidden="true"><path d="M297 373H824L975 524L876 625L977 726L820 886H324L437 774H774L820 728L774 681H397V722L289 827V583H750L811 522L775 486H410Z"/></svg>binkeep &middot; press <kbd class="kbd">Ctrl K</kbd> anytime &middot; <a href="guide.html">Guide</a> &middot; <a href="https://github.com/kano92-dir/binkeep">GitHub</a></p>
+    </section>
+
+    <section class="loading" id="loadingState" hidden aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <span id="loadingText">Analyzing...</span>
+    </section>
+
+    <section class="report" id="shared" hidden></section>
+
+    <section class="report" id="report" hidden>
+      <div class="summary" id="summary"></div>
+
+      <div class="card entropy-card">
+        <div class="card-head">
+          <h2>Entropy</h2>
+          <span class="muted" id="entropyLegend"></span>
+        </div>
+        <div class="entropy-wrap">
+          <canvas id="entropyCanvas" role="img" aria-label="Entropy across the file"></canvas>
+          <div class="tooltip" id="entropyTip" hidden></div>
+        </div>
+        <p class="muted small">Values near 8 bits per byte mean compressed or encrypted data. Click anywhere to open that offset in the hex view.</p>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Report sections" id="tabs">
+        <span class="tab-lens" id="tabLens" aria-hidden="true"></span>
+        <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+        <button role="tab" data-tab="sections">Sections</button>
+        <button role="tab" data-tab="imports">Imports</button>
+        <button role="tab" data-tab="exports">Symbols</button>
+        <button role="tab" data-tab="strings">Strings</button>
+        <button role="tab" data-tab="functions">Functions</button>
+        <button role="tab" data-tab="resources" hidden>Resources</button>
+        <button role="tab" data-tab="hex">Hex</button>
+        <button role="tab" data-tab="disasm">Disassembly</button>
+        <button role="tab" data-tab="yara">YARA</button>
+        <button role="tab" data-tab="diff" hidden>Compare</button>
+      </nav>
+
+      <div class="panel" role="tabpanel" data-panel="overview"></div>
+      <div class="panel" role="tabpanel" data-panel="sections" hidden></div>
+      <div class="panel" role="tabpanel" data-panel="imports" hidden></div>
+      <div class="panel" role="tabpanel" data-panel="exports" hidden></div>
+      <div class="panel" role="tabpanel" data-panel="strings" hidden>
+        <div class="toolbar">
+          <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span class="visually-hidden">Filter strings</span>
+            <input type="search" id="strFilter" placeholder="Filter strings (regex ok)" autocomplete="off">
+          </label>
+          <label class="select">
+            <span>Encoding</span>
+            <select id="strEnc"><option value="">All</option><option>ASCII</option><option>UTF-16</option></select>
+          </label>
+          <label class="select"><input type="checkbox" id="strRefOnly"> Referenced by code</label>
+          <div class="chips" id="strCats" role="group" aria-label="Category filter"></div>
+          <span class="muted" id="strCount"></span>
+        </div>
+        <div class="vlist strings-list" id="strList" tabindex="0" aria-label="Strings"></div>
+      </div>
+      <div class="panel" role="tabpanel" data-panel="functions" hidden>
+        <div class="toolbar">
+          <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span class="visually-hidden">Filter functions</span>
+            <input type="search" id="fnFilter" placeholder="Filter by name or address" autocomplete="off">
+          </label>
+          <label class="select">
+            <span>Sort</span>
+            <select id="fnSort"><option value="va">Address</option><option value="xrefs">Most called</option><option value="size">Largest</option><option value="name">Name</option></select>
+          </label>
+          <button class="btn" type="button" id="codeRun" hidden>Analyze code</button>
+          <span class="muted" id="fnInfo"></span>
+        </div>
+        <div class="progress" id="codeProgress" hidden><i></i></div>
+        <div class="vlist fn-list-v" id="fnList" tabindex="0" aria-label="Functions"></div>
+      </div>
+      <div class="panel" role="tabpanel" data-panel="resources" hidden></div>
+      <div class="panel" role="tabpanel" data-panel="hex" hidden>
+        <div class="toolbar">
+          <form id="hexGoto" class="goto">
+            <label for="hexGotoInput">Go to offset</label>
+            <input id="hexGotoInput" placeholder="0x400" autocomplete="off" spellcheck="false">
+            <button class="btn" type="submit">Go</button>
+          </form>
+          <span class="muted" id="hexInfo"></span>
+        </div>
+        <div class="vlist hex-list" id="hexList" tabindex="0" aria-label="Hex dump"></div>
+      </div>
+      <div class="panel" role="tabpanel" data-panel="disasm" hidden>
+        <div class="toolbar">
+          <form id="disGoto" class="goto">
+            <label for="disGotoInput">Address</label>
+            <input id="disGotoInput" placeholder="address or function name" autocomplete="off" spellcheck="false">
+            <button class="btn" type="submit">Go</button>
+          </form>
+          <button class="btn" id="disBack" type="button" disabled>Back</button>
+          <button class="btn" id="disEntry" type="button">Entry point</button>
+          <span class="muted" id="disInfo"></span>
+        </div>
+        <p class="keys muted small">Click a line, then <kbd class="kbd">N</kbd> rename function, <kbd class="kbd">;</kbd> comment, <kbd class="kbd">X</kbd> cross-references.</p>
+        <div class="disasm" id="disList" aria-live="polite"></div>
+        <button class="btn more" id="disMore" type="button" hidden>Load 300 more</button>
+      </div>
+      <div class="panel" role="tabpanel" data-panel="yara" hidden>
+        <div class="yara-grid">
+          <div class="card yara-editor">
+            <div class="card-head"><h2>Rules</h2><span class="muted small">libyara in WebAssembly, runs locally</span></div>
+            <textarea id="yaraRules" spellcheck="false" aria-label="YARA rules"></textarea>
+            <div class="toolbar">
+              <button class="btn btn-primary" type="button" id="yaraRun">Run rules</button>
+              <label class="btn" for="yaraFile">Load .yar</label>
+              <input type="file" id="yaraFile" class="visually-hidden" accept=".yar,.yara,.txt">
+              <button class="btn" type="button" id="yaraSample">Sample rules</button>
+              <span class="muted small" id="yaraStatus">Ctrl+Enter runs</span>
+            </div>
+          </div>
+          <div class="card yara-results" id="yaraResults"><div class="card-head"><h2>Matches</h2></div><p class="muted small">Run your rules to see matches here. Rules are kept in this browser and run automatically on every file you open.</p></div>
+        </div>
+      </div>
+      <div class="panel" role="tabpanel" data-panel="diff" hidden></div>
+    </section>
+  </main>
+
+  <div class="drag-overlay" id="dragOverlay" hidden>Drop to analyze</div>
+
+  <dialog class="sheet" id="xrefDlg" aria-labelledby="xrefTitle">
+    <div class="sheet-head"><h2 id="xrefTitle">Cross-references</h2><button class="btn icon-btn" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="sheet-body" id="xrefBody"></div>
+  </dialog>
+
+  <div class="edit-pop" id="editPop" hidden>
+    <label id="editLabel" for="editInput"></label>
+    <input id="editInput" autocomplete="off" spellcheck="false">
+    <span class="muted small">Enter saves, Esc cancels, empty clears</span>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

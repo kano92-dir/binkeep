@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>How to analyze an EXE, DLL, ELF or Mach-O file in the browser · binkeep guide</title>
+  <meta name="description" content="A practical guide to reverse engineering in the browser with binkeep: open a PE, ELF or Mach-O file, read its headers and imports, find functions and xrefs, disassemble code, run YARA rules and spot packers. No install, nothing uploaded.">
+  <link rel="canonical" href="https://kano92-dir.github.io/binkeep/guide.html">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="color-scheme" content="dark">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="binkeep">
+  <meta property="og:title" content="How to analyze an EXE, DLL, ELF or Mach-O file in the browser">
+  <meta property="og:description" content="Headers, imports, functions, xrefs, disassembly, YARA and packer detection, all in a browser tab. A practical guide to binkeep.">
+  <meta property="og:url" content="https://kano92-dir.github.io/binkeep/guide.html">
+  <meta property="og:image" content="https://kano92-dir.github.io/binkeep/assets/og.png">
+  <meta property="og:image:alt" content="binkeep logo with the text: reverse engineering in your browser">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://kano92-dir.github.io/binkeep/assets/og.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <meta name="theme-color" content="#000000">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "TechArticle",
+        "headline": "How to analyze an EXE, DLL, ELF or Mach-O file in the browser",
+        "description": "A practical guide to reverse engineering in the browser with binkeep.",
+        "url": "https://kano92-dir.github.io/binkeep/guide.html",
+        "image": "https://kano92-dir.github.io/binkeep/assets/screenshots/overview.png",
+        "inLanguage": "en",
+        "author": { "@type": "Person", "name": "kano92-dir", "url": "https://github.com/kano92-dir" },
+        "about": { "@id": "https://kano92-dir.github.io/binkeep/#app" },
+        "isPartOf": { "@id": "https://kano92-dir.github.io/binkeep/#website" }
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "binkeep", "item": "https://kano92-dir.github.io/binkeep/" },
+          { "@type": "ListItem", "position": 2, "name": "Guide", "item": "https://kano92-dir.github.io/binkeep/guide.html" }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="binkeep home">
+      <svg class="logo" viewBox="289 373 688 513" aria-hidden="true"><path d="M297 373H824L975 524L876 625L977 726L820 886H324L437 774H774L820 728L774 681H397V722L289 827V583H750L811 522L775 486H410Z"/></svg>
+      <span class="wordmark">binkeep</span>
+    </a>
+    <div class="actions">
+      <a class="btn hide-sm" href="https://github.com/kano92-dir/binkeep">GitHub</a>
+      <a class="btn btn-primary" href="./">Open the app</a>
+    </div>
+  </header>
+
+  <main id="main" class="doc">
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="./">binkeep</a> <span aria-hidden="true">/</span> Guide</nav>
+    <h1>How to analyze an EXE, DLL, ELF or Mach-O file in the browser</h1>
+    <p class="lede">binkeep is a free reverse engineering tool that runs in a browser tab. This guide walks through a first look at an unknown binary: what it is, what it imports, where its code is, and whether anything about it looks off. Nothing you open is uploaded, and the app keeps working offline.</p>
+
+    <nav class="toc card" aria-label="On this page">
+      <b>On this page</b>
+      <ol>
+        <li><a href="#open">Open a file</a></li>
+        <li><a href="#formats">Supported formats</a></li>
+        <li><a href="#overview">Read the overview</a></li>
+        <li><a href="#imports">Imports, symbols and strings</a></li>
+        <li><a href="#functions">Functions and cross-references</a></li>
+        <li><a href="#disasm">Disassembly</a></li>
+        <li><a href="#yara">YARA rules</a></li>
+        <li><a href="#packers">Packers and signatures</a></li>
+        <li><a href="#compare">Compare two builds</a></li>
+        <li><a href="#share">Share a report</a></li>
+        <li><a href="#keys">Keyboard shortcuts</a></li>
+        <li><a href="#faq">FAQ</a></li>
+      </ol>
+    </nav>
+
+    <section id="open">
+      <h2>1. Open a file</h2>
+      <p>Go to <a href="./">the app</a> and drop a file on the page, or click <b>Open file</b>. Any file works. Executables get the full analysis, and everything else still gets hex, strings, entropy and YARA. Files up to 512 MB are supported.</p>
+      <p>The file is read with the browser's File API and parsed in the page. There is no server side: the app is a set of static files, and after the first visit it is cached so it opens without a network connection. You can also install it as an app from the browser menu.</p>
+    </section>
+
+    <section id="formats">
+      <h2>2. Supported formats</h2>
+      <ul>
+        <li><b>Windows PE</b>: PE32 and PE32+ executables, DLLs and drivers (.exe, .dll, .sys), including .NET assemblies.</li>
+        <li><b>Linux ELF</b>: 32 and 64 bit, little and big endian (executables, .so libraries, object files).</li>
+        <li><b>macOS and iOS Mach-O</b>: 32 and 64 bit, plus universal (fat) binaries. For a universal binary, the arm64 slice is analyzed first, then x86_64.</li>
+      </ul>
+      <p>The disassembler supports x86, x64, ARM and ARM64.</p>
+    </section>
+
+    <section id="overview">
+      <h2>3. Read the overview</h2>
+      <img class="shot" src="assets/screenshots/overview.png" alt="binkeep overview tab for a Windows executable, with headers, entropy graph and security mitigations" width="1440" height="900" fetchpriority="high">
+      <p>The top row shows the format, architecture, size, overall entropy, the number of flagged API imports and the number of functions found.</p>
+      <p>The <b>entropy graph</b> plots how random each block of the file is, with section bands underneath. Normal code sits around 5 to 6.5 bits per byte. Long stretches near 8 usually mean compressed or encrypted data, which is common in packed malware, installers and embedded resources. Click anywhere on the graph to open that offset in the hex view.</p>
+      <p><b>Headers</b> list the entry point, image base, compile time, subsystem, linked libraries and, for Mach-O, the platform and SDK. <b>Things to check</b> collects anything unusual, such as an entry point in a non-executable or unexpected section, or a section that is both writable and executable. A compile time in the future is noted next to the timestamp; it usually means a reproducible build.</p>
+      <p><b>Security mitigations</b> show which protections the binary was built with: ASLR, DEP and Control Flow Guard for PE; PIE, NX, RELRO, stack canaries and FORTIFY for ELF; PIE, stack canaries, ARC and the hardened runtime for Mach-O.</p>
+    </section>
+
+    <section id="imports">
+      <h2>4. Imports, symbols and strings</h2>
+      <p>The <b>Imports</b> tab lists every library and function the binary links against. Functions used by common techniques are tagged by category, for example process injection, anti-debugging, networking, cryptography and persistence. These are hints: legitimate software calls the same APIs. After code analysis, each import shows how many places in the code call it, and <b>Called by code</b> hides imports that are never used.</p>
+      <p><b>Symbols</b> lists exports and, for ELF and Mach-O, the symbol table. <b>Strings</b> extracts ASCII and UTF-16 strings, sorts URLs, IP addresses, file paths, registry keys and module names into categories, and accepts a regular expression filter. <b>Referenced by code</b> keeps only the strings that some instruction actually points to, which removes most of the noise.</p>
+      <p>For PE files, the <b>Resources</b> tab shows version info, the manifest (including the requested execution level, such as requireAdministrator), the application icon and any resource that starts with an executable or archive header. Droppers often hide a second payload there.</p>
+    </section>
+
+    <section id="functions">
+      <h2>5. Functions and cross-references</h2>
+      <img class="shot" src="assets/screenshots/functions.png" alt="binkeep functions tab listing functions with size, callers and callees" width="1440" height="900" loading="lazy">
+      <p>binkeep finds functions with a linear sweep over the code sections, combined with the function tables the format provides: .pdata on x64 Windows, LC_FUNCTION_STARTS on Mach-O, exports, symbols and the entry point. Files with up to 8 MB of code are analyzed automatically; for larger ones, press <b>Analyze code</b> in the Functions tab.</p>
+      <p>Every call, jump, data reference and import use becomes a cross-reference (xref). The function list shows how many places call each function and how many calls it makes, and you can sort it by address, number of callers, size or name. Click the xref count anywhere in the app to see where something is used.</p>
+    </section>
+
+    <section id="disasm">
+      <h2>6. Disassembly</h2>
+      <img class="shot" src="assets/screenshots/disasm.png" alt="binkeep disassembly view with addresses, bytes, mnemonics and clickable branch targets" width="1440" height="900" loading="lazy">
+      <p>The disassembler is <a href="https://www.capstone-engine.org">Capstone</a> compiled to WebAssembly. Calls through the import table are named (for example <code>call CreateRemoteThread</code>), string references show the string inline, and branch targets are links you can follow. <b>Back</b> returns to where you were.</p>
+      <p>Type an address or a function name in the address box and press <b>Go</b>. Click a line to select it, then press <kbd class="kbd">N</kbd> to rename the function, <kbd class="kbd">;</kbd> to add a comment, or <kbd class="kbd">X</kbd> to list cross-references. Names and comments are saved in your browser for that exact file (by its SHA-256) and appear everywhere in the app.</p>
+    </section>
+
+    <section id="yara">
+      <h2>7. YARA rules</h2>
+      <p>The YARA tab runs real libyara, compiled to WebAssembly, with the <code>pe</code>, <code>elf</code> and <code>math</code> modules. Write or paste rules, or load a .yar file, then press <b>Run rules</b> or <kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Enter</kbd>. Matches show the rule metadata and each matched string with its offset; click an offset to jump to it in the hex view.</p>
+      <p>Your rules are kept in the browser and run automatically on every file you open, so a personal rule set works like a quick scanner.</p>
+<pre><code>import "pe"
+
+rule suspicious_injection
+{
+  meta:
+    description = "Imports used for classic remote thread injection"
+  condition:
+    pe.imports("kernel32.dll", "VirtualAllocEx") and
+    pe.imports("kernel32.dll", "WriteProcessMemory") and
+    pe.imports("kernel32.dll", "CreateRemoteThread")
+}</code></pre>
+      <p>Rules that use the <code>pe</code>, <code>elf</code> or <code>math</code> module need the matching <code>import</code> line at the top.</p>
+    </section>
+
+    <section id="packers">
+      <h2>8. Packers and signatures</h2>
+      <p>The <b>Packing</b> card names known packers and protectors, such as UPX, Themida, VMProtect, ASPack, MPRESS, PECompact, Enigma and common .NET obfuscators, from section names and byte signatures. When there is no known signature, heuristics still flag high code entropy, very few imports or an entry point in an unusual place. A packed file mostly shows its unpacking stub, so the rest of the report should be read with that in mind.</p>
+      <p>The <b>Signature</b> card parses Authenticode on PE files: signer, issuer, validity dates and timestamp. binkeep recomputes the file's digest and compares it with the signed one, so you can see whether the file was modified after signing. The certificate chain itself is not checked against a trust store. For Mach-O files, it shows the code signature identifier, team ID, whether it is ad-hoc signed, and whether the hardened runtime is on.</p>
+    </section>
+
+    <section id="compare">
+      <h2>9. Compare two builds</h2>
+      <p>With a file open, press <b>Compare</b> and pick a second file. The Compare tab lists the headers, mitigations, sections, imports, exports and strings that changed between them. It is useful for patch diffing at a glance, or for checking how a sample differs from a known clean version.</p>
+    </section>
+
+    <section id="share">
+      <h2>10. Share a report</h2>
+      <p><b>Share</b> copies a link that contains the report itself, compressed into the part of the URL after <code>#</code>. Browsers never send that part to a server, so the report is not stored anywhere, and the file is never included. Whoever opens the link sees a read-only report. <b>Export</b> saves the report as Markdown or JSON.</p>
+    </section>
+
+    <section id="keys">
+      <h2>11. Keyboard shortcuts</h2>
+      <table class="keys">
+        <tbody>
+          <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">K</kbd> or <kbd class="kbd">/</kbd></td><td>Search functions, imports, symbols, strings, addresses and actions</td></tr>
+          <tr><td><kbd class="kbd">G</kbd></td><td>Go to an address</td></tr>
+          <tr><td><kbd class="kbd">N</kbd></td><td>Rename the selected function (disassembly)</td></tr>
+          <tr><td><kbd class="kbd">;</kbd></td><td>Comment the selected line (disassembly)</td></tr>
+          <tr><td><kbd class="kbd">X</kbd></td><td>Cross-references to the selected line or function</td></tr>
+          <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">Enter</kbd></td><td>Run YARA rules</td></tr>
+        </tbody>
+      </table>
+      <p>On macOS, use <kbd class="kbd">Cmd</kbd> instead of <kbd class="kbd">Ctrl</kbd>.</p>
+    </section>
+
+    <section id="faq">
+      <h2>12. FAQ</h2>
+      <h3>Is my file uploaded anywhere?</h3>
+      <p>No. Parsing, hashing, disassembly and YARA all run inside the page. The only network requests are the app's own files and its fonts, and the site's security policy blocks the page from sending data anywhere else.</p>
+      <h3>Is it safe to open malware with binkeep?</h3>
+      <p>binkeep only reads the bytes of the file; it never runs it. Still, handle live samples the way you normally would, ideally in a virtual machine, and keep them out of folders that sync to the cloud.</p>
+      <h3>Does it replace Ghidra or IDA?</h3>
+      <p>No. There is no decompiler or control-flow graph. binkeep is for the first few minutes with a binary: triage, quick checks and deciding whether it deserves a deeper look in a full disassembler.</p>
+      <h3>How accurate is function detection?</h3>
+      <p>It is a linear sweep, so data inside code sections can be misread as instructions, and functions only reached through pointers can be missed. The format's own function tables (.pdata, LC_FUNCTION_STARTS, symbols) make it much more complete when they are present.</p>
+      <h3>Does it cost anything?</h3>
+      <p>No. binkeep is free and open source under the MIT license. The code is on <a href="https://github.com/kano92-dir/binkeep">GitHub</a>.</p>
+    </section>
+
+    <div class="card doc-cta">
+      <div><b>Try it on a file</b><span class="muted small">No install, no account, nothing uploaded.</span></div>
+      <a class="btn btn-primary" href="./">Open binkeep</a>
+    </div>
+  </main>
+
+  <footer class="foot doc-foot">
+    <svg viewBox="289 373 688 513" aria-hidden="true"><path d="M297 373H824L975 524L876 625L977 726L820 886H324L437 774H774L820 728L774 681H397V722L289 827V583H750L811 522L775 486H410Z"/></svg>
+    binkeep &middot; <a href="./">App</a> &middot; <a href="https://github.com/kano92-dir/binkeep">GitHub</a> &middot; MIT license
+  </footer>
+</body>
+</html>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://kano92-dir.github.io/binkeep/sitemap.xml
