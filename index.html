@@ -218,6 +218,8 @@
         <button role="tab" data-tab="resources" hidden>Resources</button>
         <button role="tab" data-tab="hex">Hex</button>
         <button role="tab" data-tab="disasm">Disassembly</button>
+        <button role="tab" data-tab="graph">Graph</button>
+        <button role="tab" data-tab="decompiler">Decompiler<span class="soon">Soon</span></button>
         <button role="tab" data-tab="yara">YARA</button>
         <button role="tab" data-tab="diff" hidden>Compare</button>
       </nav>
@@ -281,11 +283,49 @@
           </form>
           <button class="btn" id="disBack" type="button" disabled>Back</button>
           <button class="btn" id="disEntry" type="button">Entry point</button>
+          <button class="btn" id="disGraph" type="button" title="Show this function as a graph (Space)">Graph view</button>
           <span class="muted" id="disInfo"></span>
         </div>
         <p class="keys muted small">Click a line, then <kbd class="kbd">N</kbd> rename function, <kbd class="kbd">;</kbd> comment, <kbd class="kbd">X</kbd> cross-references.</p>
         <div class="disasm" id="disList" aria-live="polite"></div>
         <button class="btn more" id="disMore" type="button" hidden>Load 300 more</button>
+      </div>
+      <div class="panel" role="tabpanel" data-panel="graph" hidden>
+        <div class="toolbar">
+          <form id="cfgGoto" class="goto">
+            <label for="cfgGotoInput">Function</label>
+            <input id="cfgGotoInput" placeholder="address or function name" autocomplete="off" spellcheck="false">
+            <button class="btn" type="submit">Go</button>
+          </form>
+          <button class="btn" id="cfgBack" type="button" disabled>Back</button>
+          <div class="zoom-group" role="group" aria-label="Zoom">
+            <button class="btn" id="cfgOut" type="button" aria-label="Zoom out">&minus;</button>
+            <button class="btn" id="cfgZoom" type="button" title="Reset to 100%">100%</button>
+            <button class="btn" id="cfgIn" type="button" aria-label="Zoom in">+</button>
+          </div>
+          <button class="btn" id="cfgFit" type="button">Fit</button>
+          <button class="btn" id="cfgListing" type="button" title="Back to the listing (Space)">Listing</button>
+        </div>
+        <p class="keys muted small"><span class="cfg-key"><i class="e-true"></i>branch taken</span><span class="cfg-key"><i class="e-false"></i>not taken</span><span class="cfg-key"><i class="e-jmp"></i>always</span> Drag to move, scroll to pan, <kbd class="kbd">Ctrl</kbd> + scroll to zoom. Double-click a line to open it in the listing.</p>
+        <div class="cfg-view" id="cfgView" tabindex="0" aria-label="Control flow graph"><div class="cfg-canvas" id="cfgCanvas"></div><canvas class="cfg-mini" id="cfgMini" width="168" height="120" aria-label="Overview of the whole graph, click to move" hidden></canvas></div>
+        <span class="muted small" id="cfgInfo"></span>
+      </div>
+      <div class="panel" role="tabpanel" data-panel="decompiler" hidden>
+        <div class="card soon-card">
+          <span class="soon">Coming soon</span>
+          <h3>Decompiler</h3>
+          <p>Readable C-like code for the selected function, next to the graph and the listing. Like everything else in binkeep, it will run in your browser, so the file still never leaves your computer.</p>
+          <pre class="soon-preview" aria-hidden="true">int sub_401000(char *a1)
+{
+  if (!a1)
+    return -1;
+  return check_key(a1, strlen(a1));
+}</pre>
+          <div class="toolbar">
+            <button class="btn" type="button" data-tab-link="graph">Try the graph view</button>
+            <a class="btn" href="https://github.com/kano92-dir/binkeep" target="_blank" rel="noopener">Star on GitHub to follow progress</a>
+          </div>
+        </div>
       </div>
       <div class="panel" role="tabpanel" data-panel="yara" hidden>
         <div class="yara-grid">
@@ -321,6 +361,14 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <div class="ai-fab-wrap">
+    <button class="btn ai-fab" type="button" id="aiBtn" title="AI mode is coming soon">
+      <span class="ai-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg></span>
+      <span class="ai-lbl">AI mode</span>
+      <span class="ai-soon">soon</span>
+    </button>
+  </div>
 
   <script type="module" src="js/app.js"></script>
 </body>

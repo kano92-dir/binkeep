@@ -191,7 +191,7 @@ rule suspicious_injection
       <h3>Is it safe to open malware with binkeep?</h3>
       <p>binkeep only reads the bytes of the file; it never runs it. Still, handle live samples the way you normally would, ideally in a virtual machine, and keep them out of folders that sync to the cloud.</p>
       <h3>Does it replace Ghidra or IDA?</h3>
-      <p>No. There is no decompiler or control-flow graph. binkeep is for the first few minutes with a binary: triage, quick checks and deciding whether it deserves a deeper look in a full disassembler.</p>
+      <p>No. It has a control flow graph for any function and a decompiler is planned, but binkeep is for the first few minutes with a binary: triage, quick checks and deciding whether it deserves a deeper look in a full disassembler.</p>
       <h3>How accurate is function detection?</h3>
       <p>It is a linear sweep, so data inside code sections can be misread as instructions, and functions only reached through pointers can be missed. The format's own function tables (.pdata, LC_FUNCTION_STARTS, symbols) make it much more complete when they are present.</p>
       <h3>Does it cost anything?</h3>

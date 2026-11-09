@@ -26,6 +26,7 @@ It is not a Ghidra replacement. It covers the first part of looking at an unknow
 - Function list from a full linear sweep of the code, plus `.pdata` (x64 PE) and `LC_FUNCTION_STARTS` (Mach-O)
 - Cross-references: who calls a function, which code uses an import, which code reads a string
 - Disassembly (x86, x64, ARM, ARM64 via Capstone in WebAssembly) with API names through the IAT, GOT and Mach-O stubs, inline strings, clickable branches
+- Control flow graph for any function: basic blocks with taken / not taken / loop edges, pan and zoom, `Space` to switch between the listing and the graph
 - Your own function names and comments (`N`, `;`, `X` in the disassembly), saved in the browser per file hash
 
 **Data**
@@ -65,7 +66,7 @@ All analysis happens in the page. The only network requests are the app files an
 
 - Function discovery is a linear sweep: data inside code can be misread, and functions that are only reached through pointers may be missed
 - The Authenticode certificate chain is not verified, only the file digest
-- No decompiler or control-flow graph
+- No decompiler yet (planned)
 - API tags are hints. Legitimate software uses every one of those APIs
 
 ## License

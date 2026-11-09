@@ -1,6 +1,6 @@
 // Offline support. Network first (so updates show up right away), falling
 // back to the cache when offline. The app shell is cached on install.
-const CACHE = 'binkeep-v3';
+const CACHE = 'binkeep-v4';
 const SHELL = [
   './',
   'index.html',
@@ -11,6 +11,7 @@ const SHELL = [
   'js/app.js',
   'js/analysis.js',
   'js/disasm.js',
+  'js/cfg.js',
   'js/codeanalysis.js',
   'js/packers.js',
   'js/notes.js',

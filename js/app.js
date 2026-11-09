@@ -11,6 +11,7 @@ import { runYara, SAMPLE_RULES } from './yara.js';
 import { buildReport, encodeReport, decodeReport, reportMarkdown } from './report.js';
 import { profileOf, diffProfiles } from './diff.js';
 import { createPalette, fuzzy } from './palette.js';
+import { buildCfg, layoutCfg } from './cfg.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -54,6 +55,7 @@ const state = {
   iconUrl: null,
   tab: 'overview',
   dis: { engine: null, enginePromise: null, history: [], start: null, next: null, items: [], sel: null },
+  cfg: { graph: null, layout: null, sel: null, busy: 0, history: [], view: { x: 0, y: 0, k: 1 } },
 };
 
 /* ---------- File loading ---------- */
@@ -152,6 +154,7 @@ async function analyze(name, buf) {
   state.notes.reset();
   if (state.iconUrl) { URL.revokeObjectURL(state.iconUrl); state.iconUrl = null; }
   resetDisasm();
+  resetCfg();
 
   showLoading('Parsing headers...');
   await tick();
@@ -1183,7 +1186,8 @@ function renderItems(insns) {
   return html.join('');
 }
 
-function renderInsn(insn) {
+// Comment and link for an instruction's operand: API name, label or string.
+function insnNote(insn) {
   const m = state.model;
   const fam = state.dis.engine.family;
   const kind = classify(fam, insn.mnemonic);
@@ -1206,7 +1210,12 @@ function renderInsn(insn) {
     }
     if ((kind === 'call' || kind === 'jump') && target.direct && toff >= 0) linkVa = target.va;
   }
+  return { kind, comment, cmtClass, linkVa };
+}
 
+function renderInsn(insn) {
+  const m = state.model;
+  const { kind, comment, cmtClass, linkVa } = insnNote(insn);
   const ops = esc(insn.opStr).replace(/(#?)0x([0-9a-f]+)/gi, (all, hash, digits) => {
     const n = parseInt(digits, 16);
     if (linkVa != null && n === linkVa) return `${hash}<button class="link" data-dis="${n}">0x${digits}</button>`;
@@ -1241,6 +1250,7 @@ $('#disList').addEventListener('click', (e) => {
   if (e.target.closest('button')) return;
   const row = e.target.closest('.d-row[data-va], .d-label[data-va]');
   if (row) selectDisRow(Number(row.dataset.va));
+  highlightToken($('#disList'), wordAt(e));
 });
 $('#disList').addEventListener('dblclick', (e) => {
   const lbl = e.target.closest('.d-label[data-va]');
@@ -1253,6 +1263,379 @@ $('#disBack').addEventListener('click', () => {
 });
 $('#disEntry').addEventListener('click', () => openDisasm(defaultDisasmVa()));
 $('#disMore').addEventListener('click', () => { if (state.dis.next != null) appendDisasm(state.dis.next, 300); });
+$('#disGraph').addEventListener('click', () => openGraph(defaultGraphVa()));
+
+/* ---------- Token highlight (click a register or name to see every use) ---------- */
+
+function wordAt(e) {
+  let node, off;
+  if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(e.clientX, e.clientY); node = p?.offsetNode; off = p?.offset; }
+  else if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(e.clientX, e.clientY); node = r?.startContainer; off = r?.startOffset; }
+  if (!node || node.nodeType !== 3 || !node.parentElement?.closest('.d-mnem, .d-ops, .d-label')) return '';
+  const t = node.data, w = /[A-Za-z0-9_.$@?]/;
+  let a = off, b = off;
+  while (a > 0 && w.test(t[a - 1])) a--;
+  while (b < t.length && w.test(t[b])) b++;
+  return t.slice(a, b);
+}
+
+function highlightToken(root, word) {
+  if (!window.Highlight || !CSS.highlights) return;
+  if (!word || word.length < 2) { CSS.highlights.delete('binkeep-tok'); return; }
+  const ranges = [];
+  const isW = (c) => c != null && /[A-Za-z0-9_.$@?]/.test(c);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n && ranges.length < 3000; n = walker.nextNode()) {
+    if (!n.parentElement.closest('.d-mnem, .d-ops, .d-label')) continue;
+    const t = n.data;
+    for (let i = t.indexOf(word); i >= 0; i = t.indexOf(word, i + word.length)) {
+      if (isW(t[i - 1]) || isW(t[i + word.length])) continue;
+      const r = new Range();
+      r.setStart(n, i);
+      r.setEnd(n, i + word.length);
+      ranges.push(r);
+    }
+  }
+  CSS.highlights.set('binkeep-tok', new Highlight(...ranges));
+}
+
+/* ---------- Control flow graph ---------- */
+
+const CFG_MIN_K = 0.08, CFG_MAX_K = 2.5;
+
+function resetCfg() {
+  const g = state.cfg;
+  Object.assign(g, { graph: null, layout: null, sel: null, busy: 0, history: [] });
+  $('#cfgCanvas').innerHTML = '';
+  $('#cfgInfo').textContent = '';
+  $('#cfgBack').disabled = true;
+}
+
+function defaultGraphVa() {
+  const d = state.dis;
+  return d.sel ?? d.start ?? defaultDisasmVa();
+}
+
+function cfgNote(html) {
+  state.cfg.graph = null;
+  state.cfg.layout = null;
+  $('#cfgCanvas').innerHTML = '';
+  $('#cfgInfo').innerHTML = html;
+}
+
+async function openGraph(va, push = true) {
+  const m = state.model;
+  const g = state.cfg;
+  if (state.tab !== 'graph') selectTab('graph', false);
+  if (!m.disasm) { cfgNote(`The graph view needs x86, x64, ARM or ARM64 code. This file is ${esc(m.format)} / ${esc(m.arch)}.`); return; }
+  if (va == null || m.vaToOff(va) < 0) { $('#cfgInfo').textContent = va == null ? 'No code found.' : `${hx(va)} is not backed by file data`; return; }
+  const f = containingFunc(va);
+  const start = f ? f.va : va;
+  const end = f && f.size ? f.va + f.size : null;
+  const token = ++g.busy;
+  $('#cfgInfo').textContent = 'Building graph...';
+  let eng;
+  try {
+    eng = await getEngine();
+  } catch (err) {
+    console.error(err);
+    cfgNote(`Could not load the disassembler: ${esc(err.message)}`);
+    return;
+  }
+  if (token !== g.busy) return;
+  const cfg = buildCfg({
+    engine: eng, model: m, bytes: state.bytes, start, end,
+    isFuncStart: (t) => !!fnAt(t) || m.labels.has(t),
+  });
+  if (push && g.graph && g.graph.start !== start) g.history.push(g.graph.start);
+  $('#cfgBack').disabled = !g.history.length;
+  g.graph = { start, cfg, bounded: !!f };
+  g.sel = va !== start ? va : null;
+  $('#cfgGotoInput').value = hx(start);
+  renderCfg(va);
+  g.busy = 0;
+  scrollToPanel('graph');
+}
+
+function cfgRow(insn, blockOf) {
+  const m = state.model;
+  const { kind, comment, cmtClass, linkVa } = insnNote(insn);
+  const ops = esc(insn.opStr).replace(/(#?)0x([0-9a-f]+)/gi, (all, hash, digits) => {
+    const n = parseInt(digits, 16);
+    if (linkVa != null && n === linkVa) {
+      if (kind === 'jump' && blockOf.has(n)) return `${hash}<button class="link" data-cfgblock="${blockOf.get(n)}">${esc(labelAt(n) || `loc_${digits}`)}</button>`;
+      return `${hash}<button class="link" data-cfg="${n}">${esc(funcName(n))}</button>`;
+    }
+    return `<span class="num">${all}</span>`;
+  });
+  const cmt = comment.length > 56 ? comment.slice(0, 56) + '...' : comment;
+  const user = state.notes.comment(insn.address);
+  const sel = insn.address === state.cfg.sel ? ' sel' : '';
+  return `<div class="cfg-row${sel}" data-va="${insn.address}"><span class="d-addr">${insn.address.toString(16).padStart(m.bits === 64 ? 9 : 8, '0')}</span>  <span class="d-mnem ${kind}">${esc(insn.mnemonic.padEnd(7))}</span> <span class="d-ops">${ops}${cmt ? `  <span class="d-cmt ${cmtClass}">; ${esc(cmt)}</span>` : ''}${user ? `  <span class="d-cmt user">; ${esc(user)}</span>` : ''}</span></div>`;
+}
+
+function renderCfg(focusVa, keepView = false) {
+  const g = state.cfg;
+  const { cfg, start, bounded } = g.graph;
+  const canvas = $('#cfgCanvas');
+  const blockOf = new Map(cfg.blocks.map((b) => [b.start, b.id]));
+  const nodes = cfg.blocks.map((b) => {
+    const label = b.id === 0 ? funcName(b.start) : (labelAt(b.start) || `loc_${b.start.toString(16)}`);
+    const tag = b.id === 0 ? 'entry' : !b.succ.length ? (b.exit != null ? 'tail' : 'exit') : `${b.insns.length}`;
+    return `<div class="cfg-node${b.id === 0 ? ' entry' : ''}${!b.succ.length ? ' leaf' : ''}" data-block="${b.id}" style="--d:${Math.min(b.id, 40)}"><div class="cfg-head"><span class="cfg-name">${esc(label)}</span><span class="cfg-tag">${tag}</span></div><div class="cfg-body">${b.insns.map((i) => cfgRow(i, blockOf)).join('')}</div></div>`;
+  });
+  canvas.innerHTML = nodes.join('');
+  const els = $$('.cfg-node', canvas);
+  const layout = layoutCfg(cfg.blocks, els.map((el) => ({ w: el.offsetWidth, h: el.offsetHeight })));
+  g.layout = layout;
+  els.forEach((el, i) => { el.style.left = `${layout.nodes[i].x}px`; el.style.top = `${layout.nodes[i].y}px`; });
+  const marker = (k) => `<marker id="cfg-arrow-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" class="e-${k}"/></marker>`;
+  canvas.insertAdjacentHTML('afterbegin', `<svg class="cfg-edges" style="width:${layout.width}px;height:${layout.height}px" viewBox="0 0 ${layout.width} ${layout.height}" aria-hidden="true"><defs>${['true', 'false', 'jmp'].map(marker).join('')}</defs>${layout.edges.map((e) => `<path class="e-${e.kind}${e.back ? ' back' : ''}" data-from="${e.from}" data-to="${e.to}" d="${e.d}" marker-end="url(#cfg-arrow-${e.kind})"/>`).join('')}</svg>`);
+  canvas.style.width = `${layout.width}px`;
+  canvas.style.height = `${layout.height}px`;
+  const loops = layout.edges.filter((e) => e.back).length;
+  $('#cfgInfo').textContent = `${funcName(start)}: ${cfg.blocks.length} block${cfg.blocks.length === 1 ? '' : 's'}, ${cfg.insnCount.toLocaleString()} instructions${loops ? `, ${loops} loop${loops > 1 ? 's' : ''}` : ''}${cfg.truncated ? ', truncated (very large function)' : ''}${!bounded && state.model.disasm ? '. Function bounds are a guess until code analysis runs.' : ''}`;
+  canvas.classList.toggle('enter', !keepView);
+  if (keepView) { applyCfgView(); return; }
+  const focus = focusVa != null ? cfg.blocks.find((b) => b.insns.some((i) => i.address === focusVa)) : null;
+  initialCfgView(focus ? focus.id : 0);
+}
+
+function applyCfgView() {
+  const v = state.cfg.view;
+  $('#cfgCanvas').style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.k})`;
+  $('#cfgZoom').textContent = `${Math.round(v.k * 100)}%`;
+  // The dot grid moves and scales with the graph.
+  let gs = 22 * v.k;
+  while (gs < 11) gs *= 2;
+  const box = $('#cfgView');
+  box.style.setProperty('--gs', `${gs}px`);
+  box.style.setProperty('--gx', `${v.x % gs}px`);
+  box.style.setProperty('--gy', `${v.y % gs}px`);
+  drawMinimap();
+}
+
+const MINI_W = 168, MINI_H = 120;
+function miniScale() {
+  const L = state.cfg.layout;
+  return Math.min((MINI_W - 16) / L.width, (MINI_H - 16) / L.height);
+}
+
+function drawMinimap() {
+  const cv = $('#cfgMini'), L = state.cfg.layout;
+  cv.hidden = !L || L.nodes.length < 2;
+  if (cv.hidden) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (cv.width !== MINI_W * dpr) { cv.width = MINI_W * dpr; cv.height = MINI_H * dpr; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, MINI_W, MINI_H);
+  const s = miniScale();
+  const ox = (MINI_W - L.width * s) / 2, oy = (MINI_H - L.height * s) / 2;
+  L.nodes.forEach((n, i) => {
+    ctx.fillStyle = i === 0 ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.32)';
+    ctx.fillRect(ox + n.x * s, oy + n.y * s, Math.max(1.5, n.w * s), Math.max(1.5, n.h * s));
+  });
+  const v = state.cfg.view, box = $('#cfgView');
+  const rx = ox + (-v.x / v.k) * s, ry = oy + (-v.y / v.k) * s;
+  const rw = (box.clientWidth / v.k) * s, rh = (box.clientHeight / v.k) * s;
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(rx, ry, rw, rh);
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(rx) + 0.5, Math.round(ry) + 0.5, Math.round(rw), Math.round(rh));
+}
+
+// Center the main view on a point picked in the minimap.
+function miniJump(e) {
+  const cv = $('#cfgMini'), L = state.cfg.layout, box = $('#cfgView');
+  const r = cv.getBoundingClientRect(), s = miniScale();
+  const gx = (e.clientX - r.left - (MINI_W - L.width * s) / 2) / s;
+  const gy = (e.clientY - r.top - (MINI_H - L.height * s) / 2) / s;
+  const v = state.cfg.view;
+  v.x = box.clientWidth / 2 - gx * v.k;
+  v.y = box.clientHeight / 2 - gy * v.k;
+  applyCfgView();
+}
+
+// Hovering a block lights up its edges and neighbours and dims the rest.
+function hotBlock(id) {
+  const canvas = $('#cfgCanvas');
+  $$('.hot', canvas).forEach((el) => el.classList.remove('hot', 'near'));
+  canvas.classList.toggle('focus', id != null);
+  if (id == null) return;
+  $(`.cfg-node[data-block="${id}"]`, canvas)?.classList.add('hot');
+  $$(`path[data-from="${id}"], path[data-to="${id}"]`, canvas).forEach((p) => {
+    p.classList.add('hot');
+    const other = p.dataset.from === String(id) ? p.dataset.to : p.dataset.from;
+    $(`.cfg-node[data-block="${other}"]`, canvas)?.classList.add('hot', 'near');
+  });
+}
+
+function initialCfgView(blockId) {
+  const g = state.cfg, L = g.layout, box = $('#cfgView');
+  const vw = box.clientWidth, vh = box.clientHeight;
+  const k = Math.max(0.55, Math.min(1, (vw - 40) / L.width));
+  const n = L.nodes[blockId];
+  const x = L.width * k <= vw ? (vw - L.width * k) / 2 : vw / 2 - (n.x + n.w / 2) * k;
+  const y = blockId === 0 ? 24 - n.y * k : vh / 2 - (n.y + Math.min(n.h, vh / k / 2) / 2) * k;
+  g.view = { x, y, k };
+  applyCfgView();
+  if (blockId) flashBlock(blockId);
+}
+
+function fitCfg() {
+  const g = state.cfg, L = g.layout, box = $('#cfgView');
+  if (!L) return;
+  const vw = box.clientWidth, vh = box.clientHeight;
+  const k = Math.max(CFG_MIN_K, Math.min(1.2, (vw - 32) / L.width, (vh - 32) / L.height));
+  g.view = { x: (vw - L.width * k) / 2, y: Math.max(16, (vh - L.height * k) / 2), k };
+  applyCfgView();
+}
+
+function zoomCfg(factor, cx, cy) {
+  const v = state.cfg.view, box = $('#cfgView');
+  if (cx == null) { cx = box.clientWidth / 2; cy = box.clientHeight / 2; }
+  const k = Math.max(CFG_MIN_K, Math.min(CFG_MAX_K, v.k * factor));
+  v.x = cx - (cx - v.x) * (k / v.k);
+  v.y = cy - (cy - v.y) * (k / v.k);
+  v.k = k;
+  applyCfgView();
+}
+
+function flashBlock(id) {
+  const el = $(`#cfgCanvas .cfg-node[data-block="${id}"]`);
+  if (!el) return;
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
+}
+
+function centerBlock(id) {
+  const g = state.cfg, n = g.layout?.nodes[id], box = $('#cfgView');
+  if (!n) return;
+  const v = g.view;
+  v.x = box.clientWidth / 2 - (n.x + n.w / 2) * v.k;
+  v.y = Math.min(box.clientHeight / 2 - (n.y + n.h / 2) * v.k, 40 - n.y * v.k);
+  $('#cfgCanvas').classList.add('glide');
+  applyCfgView();
+  setTimeout(() => $('#cfgCanvas').classList.remove('glide'), 420);
+  flashBlock(id);
+}
+
+function selectCfgRow(va) {
+  state.cfg.sel = va;
+  $$('#cfgCanvas .cfg-row.sel').forEach((r) => r.classList.remove('sel'));
+  $(`#cfgCanvas .cfg-row[data-va="${va}"]`)?.classList.add('sel');
+}
+
+function graphToListing() {
+  const g = state.cfg;
+  if (!g.graph) { selectTab('disasm'); return; }
+  openDisasm(g.graph.start, true, g.sel ?? g.graph.start);
+}
+
+{
+  const box = $('#cfgView');
+  let drag = null, justDragged = false;
+  box.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('button, .cfg-mini')) return;
+    drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x: state.cfg.view.x, y: state.cfg.view.y, moved: false };
+  });
+  box.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved) { drag.moved = true; box.setPointerCapture(e.pointerId); box.classList.add('dragging'); }
+    state.cfg.view.x = drag.x + dx;
+    state.cfg.view.y = drag.y + dy;
+    applyCfgView();
+  });
+  const end = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (drag.moved) {
+      box.classList.remove('dragging');
+      // The click that ends a drag should not select a row.
+      justDragged = true;
+      setTimeout(() => { justDragged = false; }, 0);
+    }
+    drag = null;
+  };
+  box.addEventListener('pointerup', end);
+  box.addEventListener('pointercancel', end);
+  box.addEventListener('wheel', (e) => {
+    if (!state.cfg.layout) return;
+    e.preventDefault();
+    const r = box.getBoundingClientRect();
+    if (e.ctrlKey || e.metaKey) { zoomCfg(Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.0025)), e.clientX - r.left, e.clientY - r.top); return; }
+    const mult = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? box.clientHeight : 1;
+    const v = state.cfg.view;
+    if (e.shiftKey && !e.deltaX) v.x -= e.deltaY * mult;
+    else { v.x -= e.deltaX * mult; v.y -= e.deltaY * mult; }
+    applyCfgView();
+  }, { passive: false });
+  box.addEventListener('click', (e) => {
+    if (justDragged) return;
+    const jb = e.target.closest('[data-cfgblock]');
+    if (jb) { e.stopPropagation(); centerBlock(Number(jb.dataset.cfgblock)); return; }
+    const fn = e.target.closest('[data-cfg]');
+    if (fn) { e.stopPropagation(); openGraph(Number(fn.dataset.cfg)); return; }
+    if (e.target.closest('button')) return;
+    const row = e.target.closest('.cfg-row[data-va]');
+    if (row) selectCfgRow(Number(row.dataset.va));
+    highlightToken($('#cfgCanvas'), wordAt(e));
+  });
+  box.addEventListener('pointerover', (e) => {
+    if (drag?.moved) return;
+    const n = e.target.closest('.cfg-node');
+    hotBlock(n ? Number(n.dataset.block) : null);
+  });
+  box.addEventListener('pointerleave', () => hotBlock(null));
+  const mini = $('#cfgMini');
+  mini.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    mini.setPointerCapture(e.pointerId);
+    miniJump(e);
+    const move = (ev) => miniJump(ev);
+    mini.addEventListener('pointermove', move);
+    mini.addEventListener('pointerup', () => mini.removeEventListener('pointermove', move), { once: true });
+  });
+  mini.addEventListener('click', (e) => e.stopPropagation());
+  mini.addEventListener('wheel', (e) => e.stopPropagation());
+  box.addEventListener('dblclick', (e) => {
+    const row = e.target.closest('.cfg-row[data-va]');
+    if (!row || e.target.closest('button')) return;
+    state.cfg.sel = Number(row.dataset.va);
+    graphToListing();
+  });
+  box.addEventListener('keydown', (e) => {
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomCfg(1.2); }
+    else if (e.key === '-') { e.preventDefault(); zoomCfg(1 / 1.2); }
+    else if (e.key === '0') { e.preventDefault(); fitCfg(); }
+  });
+  $('#cfgGoto').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const t = $('#cfgGotoInput').value.trim();
+    let n = parseNum(t);
+    if (Number.isNaN(n) || (!/^0x/i.test(t) && /[g-z_]/i.test(t))) {
+      const q = t.toLowerCase();
+      const hit = state.code?.functions.find((f) => funcName(f.va).toLowerCase() === q)
+        || [...state.model.labels].find(([, name]) => name.toLowerCase() === q);
+      n = hit ? (Array.isArray(hit) ? hit[0] : hit.va) : NaN;
+    }
+    if (Number.isNaN(n)) { $('#cfgInfo').textContent = 'Enter a hex address or a function name'; return; }
+    openGraph(n);
+  });
+  $('#cfgFit').addEventListener('click', fitCfg);
+  $('#cfgIn').addEventListener('click', () => zoomCfg(1.25));
+  $('#cfgOut').addEventListener('click', () => zoomCfg(1 / 1.25));
+  $('#cfgZoom').addEventListener('click', () => { if (state.cfg.layout) { const v = state.cfg.view; zoomCfg(1 / v.k); } });
+  $('#cfgListing').addEventListener('click', graphToListing);
+  $('#cfgBack').addEventListener('click', () => {
+    const prev = state.cfg.history.pop();
+    if (prev != null) openGraph(prev, false);
+  });
+}
 
 /* ---------- Inline editing (rename, comment) ---------- */
 
@@ -1289,6 +1672,7 @@ $('#editInput').addEventListener('blur', () => setTimeout(() => closeEditor(fals
 function afterNotesChange() {
   refreshNames();
   renderNotesCard();
+  if (state.cfg.graph) renderCfg(null, true);
 }
 
 function editName(va, anchor) {
@@ -1607,7 +1991,7 @@ async function openShared(token) {
 
 /* ---------- Command palette ---------- */
 
-const TAB_NAMES = { overview: 'Overview', sections: 'Sections', imports: 'Imports', exports: 'Symbols', strings: 'Strings', functions: 'Functions', resources: 'Resources', hex: 'Hex', disasm: 'Disassembly', yara: 'YARA', diff: 'Compare' };
+const TAB_NAMES = { overview: 'Overview', sections: 'Sections', imports: 'Imports', exports: 'Symbols', strings: 'Strings', functions: 'Functions', resources: 'Resources', hex: 'Hex', disasm: 'Disassembly', graph: 'Graph', decompiler: 'Decompiler', yara: 'YARA', diff: 'Compare' };
 
 function paletteItems(q) {
   const items = [];
@@ -1733,6 +2117,7 @@ function selectTab(tab, autoDisasm = true) {
   if (tab === 'strings') state.strList?.refresh();
   if (tab === 'functions') state.fnList?.refresh();
   if (autoDisasm && tab === 'disasm' && state.dis.start == null && state.model && !$('#disList').childElementCount) openDisasm(defaultDisasmVa(), false);
+  if (autoDisasm && tab === 'graph' && state.model && !state.cfg.graph && !state.cfg.busy) openGraph(defaultGraphVa());
 }
 
 // Place a panel's top edge just below the pinned tab bar.
@@ -1837,6 +2222,12 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/') { e.preventDefault(); palette.open(); return; }
   if (!state.bytes || $('#report').hidden) return;
   if (e.key === 'g') { e.preventDefault(); palette.open('0x'); return; }
+  // Space switches between the listing and the graph, like most RE tools.
+  if (e.key === ' ' && document.activeElement?.tagName !== 'BUTTON' && (state.tab === 'disasm' || state.tab === 'graph') && state.model.disasm) {
+    e.preventDefault();
+    if (state.tab === 'disasm') openGraph(defaultGraphVa()); else graphToListing();
+    return;
+  }
   if (state.tab !== 'disasm' || state.dis.sel == null) return;
   const va = state.dis.sel;
   const row = $(`#disList [data-va="${va}"]`) || $('#disList');
@@ -1853,6 +2244,16 @@ document.addEventListener('keydown', (e) => {
     else { const f = containingFunc(va); if (f) xrefsForVa(f.va); else toast(state.code ? 'No references to this line.' : 'Code analysis has not run yet.'); }
   }
 });
+
+/* ---------- AI button (coming soon, no action yet) ---------- */
+
+$('#aiBtn').addEventListener('click', () => {
+  const b = $('#aiBtn');
+  b.classList.remove('pulse');
+  void b.offsetWidth;
+  b.classList.add('pulse');
+});
+
 
 /* ---------- Boot ---------- */
 
