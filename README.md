@@ -6,6 +6,8 @@
 
 It is not a Ghidra replacement. It covers the first part of looking at an unknown binary, without installing anything: malware triage, CTF challenges, checking what a downloaded tool imports, or comparing two builds.
 
+![Control flow graph of a function, with taken / not taken branches and a minimap](assets/screenshots/graph.png)
+
 ![Disassembly with clickable branches](assets/screenshots/disasm.png)
 
 ## Features
