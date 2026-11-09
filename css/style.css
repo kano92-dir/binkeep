@@ -732,3 +732,10 @@ tr.st-same td { color: var(--faint); }
 .doc-foot { padding: 0 16px 32px; flex-wrap: wrap; }
 @media (max-width: 480px) { .topbar .hide-sm { display: none; } }
 a.btn { text-decoration: none; }
+.star-btn svg { transition: fill 200ms var(--ease), stroke 200ms var(--ease); }
+.star-btn:hover svg { fill: #f5c542; stroke: #f5c542; }
+@media (max-width: 480px) { .actions:has(#compareBtn:not([hidden])) .star-btn { display: none; } }
+@media (max-width: 1100px) {
+  .actions:has(#compareBtn:not([hidden])) .star-btn { padding: 0; width: 40px; }
+  .actions:has(#compareBtn:not([hidden])) .star-btn .lbl { display: none; }
+}
