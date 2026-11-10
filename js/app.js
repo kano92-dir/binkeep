@@ -191,6 +191,7 @@ async function analyze(name, buf) {
   $('[data-panel="diff"]').innerHTML = '';
 
   renderSummary();
+  renderBrief();
   drawEntropy();
   renderOverview();
   renderSections();
@@ -218,6 +219,8 @@ async function analyze(name, buf) {
       if (state.bytes !== bytes) return;
       state.signature.intact = ok;
       renderSignatureCard();
+      applyTips($('#sigCard'));
+      renderBrief();
     }).catch(() => {});
   }
   maybeAutoAnalyze();
@@ -317,6 +320,208 @@ function renderSummary() {
     ['Functions', fnCount],
   ];
   $('#summary').innerHTML = stats.map(([k, v, cls]) => `<dl class="stat"><dt>${k}</dt><dd class="${cls || ''}">${esc(v)}</dd></dl>`).join('');
+  applyTips($('#summary'));
+}
+
+/* ---------- Quick read: a plain-language summary for people new to this ---------- */
+
+const CAPS = {
+  injection: ['bad', 'Can write into other running programs'],
+  keyboard: ['bad', 'Can watch what you type'],
+  network: ['warn', 'Can connect to the internet'],
+  'anti-debug': ['warn', 'Checks whether someone is debugging it'],
+  persistence: ['warn', 'Can change the registry or install services'],
+  execution: ['info', 'Can start other programs'],
+  crypto: ['info', 'Uses encryption'],
+};
+
+function plainKind() {
+  const m = state.model;
+  const fact = (k) => m.facts.find(([key]) => key === k)?.[1] || '';
+  const kind = String(m.kind || '');
+  if (m.pe) {
+    if (kind === 'DLL') return 'library (DLL)';
+    if (kind.startsWith('Driver')) return 'driver';
+    const sub = fact('Subsystem');
+    if (/console/i.test(sub)) return 'command-line program';
+    if (/GUI/.test(sub)) return 'program with a window';
+    return 'program';
+  }
+  if (/executable/i.test(kind)) return 'program';
+  if (/shared object|dynamic library|dylib/i.test(kind)) return 'library';
+  if (/object/i.test(kind)) return 'object file (not linked yet)';
+  return kind.toLowerCase() || 'file';
+}
+
+function briefItems() {
+  const m = state.model;
+  const items = [];
+  // Who made it
+  if (m.pe) {
+    const s = state.signature;
+    if (!s) items.push({ lv: 'warn', text: 'No digital signature inside the file', sub: 'Nothing proves who made it. Windows system files are often signed separately, so this alone is not alarming.' });
+    else if (s.error && !s.certs.length) items.push({ lv: 'warn', text: 'Has a signature that could not be read' });
+    else {
+      const who = s.signer?.subject?.CN || s.signer?.subject?.O || 'an unknown publisher';
+      if (s.intact === false) items.push({ lv: 'bad', text: `Signed by ${who}, but changed after signing`, sub: 'Someone modified the file after it was signed.' });
+      else items.push({ lv: 'ok', text: `Signed by ${who}` });
+    }
+  } else if (m.macho) {
+    const s = m.macho.codeSig;
+    if (!s) items.push({ lv: 'warn', text: 'Not signed' });
+    else if (s.adhoc) items.push({ lv: 'warn', text: 'Ad-hoc signed, with no developer identity' });
+    else items.push({ lv: 'ok', text: `Signed${s.team ? ` by developer team ${s.team}` : ''}` });
+  }
+  // Hidden code
+  const p = state.packing;
+  if (p && m.disasm) {
+    if (p.packers.length) items.push({ lv: 'bad', text: `Packed with ${p.packers.map((x) => x.name).join(', ')}`, sub: 'The real code is compressed or encrypted and only appears when the program runs.' });
+    else if (p.verdict === 'likely') items.push({ lv: 'warn', text: 'Looks packed or encrypted', sub: 'Part of the real code may be hidden until it runs.' });
+    else if (p.verdict === 'maybe') items.push({ lv: 'warn', text: 'Might be packed' });
+    else items.push({ lv: 'ok', text: 'Not packed, the code can be read as is' });
+  }
+  // What it can do
+  const cats = new Set(flaggedImports().map((f) => f.cat));
+  const caps = Object.entries(CAPS).filter(([c]) => cats.has(c));
+  for (const [, [lv, text]] of caps) items.push({ lv, text, tab: 'imports' });
+  if (m.imports.length && !caps.length) items.push({ lv: 'ok', text: 'No risky-looking imports', tab: 'imports' });
+  // Addresses inside
+  const urls = new Set(), ips = new Set();
+  for (const s of state.strings) {
+    if (s.cat === 'url') urls.add(s.text);
+    else if (s.cat === 'ip') ips.add(s.text);
+  }
+  if (urls.size || ips.size) {
+    const parts = [urls.size && `${urls.size} web address${urls.size > 1 ? 'es' : ''}`, ips.size && `${ips.size} IP address${ips.size > 1 ? 'es' : ''}`].filter(Boolean);
+    items.push({ lv: 'info', text: `Contains ${parts.join(' and ')}`, tab: 'strings', cat: urls.size ? 'url' : 'ip' });
+  }
+  // Known threats
+  const y = state.yara;
+  if (y) {
+    const n = y.rules.length;
+    items.push(n
+      ? { lv: 'bad', text: `${n} YARA rule${n > 1 ? 's' : ''} matched: ${y.rules.slice(0, 3).map((r) => r.name).join(', ')}${n > 3 ? '...' : ''}`, tab: 'yara' }
+      : { lv: 'ok', text: 'None of your YARA rules matched', tab: 'yara' });
+  } else items.push({ lv: 'idle', text: 'Check against YARA rules', tab: 'yara' });
+  return items;
+}
+
+function renderBrief() {
+  const m = state.model;
+  const el = $('#brief');
+  if (!m.disasm && !m.pe && !m.macho && !m.format.startsWith('ELF')) {
+    el.innerHTML = `<div class="brief-head"><span class="brief-kicker">Quick read</span><h3>Not a program file binkeep can read</h3><p class="muted">Detected as ${esc(m.format)}. The hex view and strings still work.</p></div>`;
+    applyTips(el);
+    return;
+  }
+  const platform = m.pe ? 'Windows' : m.macho ? 'macOS' : 'Linux';
+  const bits = m.bits || (/64/.test(m.arch) ? 64 : 32);
+  const headline = `${bits}-bit ${platform} ${plainKind()}`;
+  const icon = { ok: '<polyline points="20 6 9 17 4 12"/>', warn: '<line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.5"/>', bad: '<line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.5"/>', info: '<line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="7.5" x2="12" y2="7.5"/>', idle: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/>' };
+  const items = briefItems().map((it) => {
+    const attrs = it.tab ? ` data-tab-link="${it.tab}"${it.cat ? ` data-strcat="${it.cat}"` : ''}` : '';
+    const tag = it.tab ? 'button type="button"' : 'div';
+    const end = it.tab ? 'button' : 'div';
+    return `<li class="b-${it.lv}"><${tag} class="b-item"${attrs}><span class="b-ico"><svg viewBox="0 0 24 24" aria-hidden="true">${icon[it.lv]}</svg></span><span class="b-text"><b>${esc(it.text)}</b>${it.sub ? `<span>${esc(it.sub)}</span>` : ''}</span></${end}></li>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="brief-head">
+      <span class="brief-kicker">Quick read</span>
+      <h3>${esc(headline)}</h3>
+      <p class="muted">${esc(m.arch)} · ${fmtSize(state.bytes.length)}</p>
+    </div>
+    <ul class="brief-list">${items}</ul>
+    <p class="muted small brief-note">A quick read of how the file is built, not a verdict. Normal software does many of these things too. Hover or tap the underlined words to learn what they mean.</p>`;
+}
+
+/* ---------- Tooltips for beginners ---------- */
+
+const TIPS = {
+  // tabs
+  'tab:overview': 'The big picture: what kind of file this is, who signed it and what to look at first.',
+  'tab:sections': 'A program file is split into named parts, like chapters. Code, data and resources usually live in different sections.',
+  'tab:imports': 'Functions the program borrows from the operating system, such as opening files or connecting to the internet. A quick hint at what it can do.',
+  'tab:exports': 'Names this file offers to other programs, plus any function names the compiler left behind.',
+  'tab:strings': 'Readable text found inside the file: messages, web addresses, file paths. Often the fastest clue.',
+  'tab:functions': 'The separate pieces of code the program is made of, found by scanning its instructions.',
+  'tab:resources': 'Extra files stored inside a Windows program: icons, version info, dialogs, and sometimes hidden data.',
+  'tab:hex': 'The raw bytes of the file, exactly as stored on disk.',
+  'tab:disasm': 'The machine code translated into readable processor instructions (assembly).',
+  'tab:graph': 'One function drawn as blocks and arrows, so you can follow its if/else paths and loops.',
+  'tab:decompiler': 'Coming soon: the machine code turned back into something that reads like C.',
+  'tab:yara': 'YARA rules are patterns that security researchers write to recognize known malware. Paste rules here and see which ones match this file.',
+  'tab:diff': 'What changed between this file and a second one you opened.',
+  // labels and headings
+  Format: 'The file format. PE is Windows, ELF is Linux, Mach-O is macOS and iOS.',
+  Architecture: 'The kind of processor the code runs on. x86-64 is a normal 64-bit PC, ARM64 is phones and Apple Silicon Macs.',
+  Entropy: 'How random the bytes look, from 0 to 8. Normal code sits around 5 to 6.5. Close to 8 usually means compressed or encrypted data.',
+  'Flagged APIs': 'Imported functions that malware often uses, such as writing into other programs. Normal software uses many of them too.',
+  Functions: 'How many separate pieces of code were found in the program.',
+  'Things to check': 'Odd details in the file headers that are worth a second look.',
+  'Security mitigations': 'Protections the program was built with that make it harder to attack. "off" is common in old or small programs.',
+  'API categories': 'Imported functions grouped by what they let the program do.',
+  Packing: 'A packed program is compressed or encrypted and unpacks itself when it runs. Malware often does this to hide its code.',
+  Signature: 'A digital signature shows who published the file and proves it has not been changed since.',
+  Hashes: 'Fingerprints of the file. Search one on a site like VirusTotal to see if this exact file is known, without uploading it.',
+  Headers: 'Basic facts stored at the start of the file: type, processor, entry point and build time.',
+};
+
+// Mark headings and labels that have an explanation.
+function applyTips(root = document) {
+  $$('h2, .stat dt', root).forEach((el) => {
+    if (el.querySelector('.tip')) return;
+    const key = el.textContent.trim();
+    if (!TIPS[key]) return;
+    el.innerHTML = `<span class="tip" tabindex="0" data-tip="${esc(TIPS[key])}">${esc(key)}</span>`;
+  });
+}
+
+{
+  const box = document.createElement('div');
+  box.className = 'tipbox';
+  box.id = 'tipBox';
+  box.setAttribute('role', 'tooltip');
+  box.hidden = true;
+  document.body.append(box);
+  let timer = 0, current = null;
+  const textFor = (el) => el.dataset.tip || (el.matches('#tabs [data-tab]') ? TIPS[`tab:${el.dataset.tab}`] : '');
+  const show = (el) => {
+    const text = textFor(el);
+    if (!text) return;
+    current = el;
+    box.textContent = text;
+    box.hidden = false;
+    const r = el.getBoundingClientRect();
+    const bw = box.offsetWidth, bh = box.offsetHeight;
+    let x = r.left + r.width / 2 - bw / 2;
+    x = Math.max(12, Math.min(x, innerWidth - bw - 12));
+    let y = r.bottom + 10;
+    if (y + bh > innerHeight - 12) y = r.top - bh - 10;
+    box.style.left = `${x}px`;
+    box.style.top = `${y}px`;
+  };
+  const hide = () => { clearTimeout(timer); current = null; box.hidden = true; };
+  const target = (e) => e.target.closest?.('.tip[data-tip], #tabs [data-tab]');
+  document.addEventListener('pointerover', (e) => {
+    if (e.pointerType === 'touch') return;
+    const t = target(e);
+    if (t === current) return;
+    clearTimeout(timer);
+    if (!t) { hide(); return; }
+    box.hidden = true;
+    timer = setTimeout(() => show(t), t.matches('#tabs [data-tab]') ? 550 : 200);
+  });
+  // On touch screens a tap on an underlined word shows its explanation.
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('.tip[data-tip]');
+    if (t) { if (current === t) hide(); else show(t); return; }
+    hide();
+  });
+  document.addEventListener('focusin', (e) => { const t = e.target.closest?.('.tip[data-tip]'); if (t) show(t); });
+  document.addEventListener('focusout', hide);
+  window.addEventListener('scroll', hide, { passive: true });
+  applyTips($('.entropy-card'));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
 }
 
 function renderFileIcon() {
@@ -374,6 +579,7 @@ function renderOverview() {
     <div class="card"><div class="card-head"><h2>Hashes</h2><span class="muted small">computed locally</span></div><div id="hashes" class="muted small">Computing...</div></div>`;
   renderPackingCard();
   renderSignatureCard();
+  applyTips($('[data-panel="overview"]'));
 }
 
 function renderPackingCard() {
@@ -1775,6 +1981,7 @@ async function runYaraNow(quiet = false) {
   }
   if (state.bytes !== bytes) return;
   state.yara = res;
+  renderBrief();
   const ms = Math.round(performance.now() - t0);
   const fatal = res.errors.filter((e) => !e.warning);
   $('#yaraStatus').textContent = fatal.length ? `${fatal.length} error${fatal.length > 1 ? 's' : ''}` : `${res.rules.length} rule${res.rules.length === 1 ? '' : 's'} matched in ${ms} ms`;
