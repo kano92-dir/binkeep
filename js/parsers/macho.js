@@ -308,6 +308,7 @@ export function parseMachO(bytes) {
     bits,
     kind: FILETYPES[filetype] || `type ${filetype}`,
     entry,
+    entryIsMain: entryOff != null,
     facts: [
       ['Format', `${is64 ? 'Mach-O 64-bit' : 'Mach-O 32-bit'}${slices ? ` (universal: ${slices.map((a) => a.name).join(', ')})` : ''}`],
       ['Architecture', archName],

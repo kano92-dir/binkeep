@@ -28,6 +28,7 @@ It is not a Ghidra replacement. It covers the first part of looking at an unknow
 - Function list from a full linear sweep of the code, plus `.pdata` (x64 PE) and `LC_FUNCTION_STARTS` (Mach-O)
 - Cross-references: who calls a function, which code uses an import, which code reads a string
 - Disassembly (x86, x64, ARM, ARM64 via Capstone in WebAssembly) with API names through the IAT, GOT and Mach-O stubs, inline strings, clickable branches
+- Jump to main: skips the compiler's startup code and opens the program's own `main` (MSVC and MinGW startup, glibc `__libc_start_main`, Mach-O `LC_MAIN`, Go `main.main` even when stripped), or press `M`
 - Control flow graph for any function: basic blocks with taken / not taken / loop edges, pan and zoom, `Space` to switch between the listing and the graph
 - Your own function names and comments (`N`, `;`, `X` in the disassembly), saved in the browser per file hash
 

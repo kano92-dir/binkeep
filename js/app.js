@@ -4,6 +4,7 @@ import { isMachO, parseMachO } from './parsers/macho.js';
 import { parseResources, parseAuthenticode, verifyDigest } from './parsers/pe-extra.js';
 import { entropy, entropyBlocks, extractStrings, hashes, flagApi } from './analysis.js';
 import { createDisassembler, classify, isUnconditionalEnd, operandTarget } from './disasm.js';
+import { findMain } from './findmain.js';
 import { detectPackers } from './packers.js';
 import { analyzeCode, codeSize, decRef } from './codeanalysis.js';
 import { createNotes } from './notes.js';
@@ -1242,7 +1243,7 @@ function saveResource(i) {
 function resetDisasm() {
   const d = state.dis;
   if (d.engine) { try { d.engine.close(); } catch { /* closed */ } }
-  Object.assign(d, { engine: null, enginePromise: null, history: [], start: null, next: null, items: [], sel: null });
+  Object.assign(d, { engine: null, enginePromise: null, history: [], start: null, next: null, items: [], sel: null, main: undefined });
   $('#disList').innerHTML = '';
   $('#disMore').hidden = true;
   $('#disBack').disabled = true;
@@ -1468,6 +1469,39 @@ $('#disBack').addEventListener('click', () => {
   if (prev != null) openDisasm(prev, false);
 });
 $('#disEntry').addEventListener('click', () => openDisasm(defaultDisasmVa()));
+$('#disMain').addEventListener('click', () => jumpToMain());
+
+const MAIN_HOW = {
+  symbol: 'from the symbol table',
+  LC_MAIN: 'from the LC_MAIN load command',
+  'CRT startup': 'by following the C runtime startup code',
+  '__libc_start_main': 'from the address passed to __libc_start_main',
+  'exit call': 'in the startup code, as the call whose result goes to exit()',
+  'Go pclntab': 'in the Go function table',
+};
+
+// Open the program's own main function instead of the compiler's startup code.
+async function jumpToMain() {
+  const m = state.model;
+  if (!m?.disasm) { openDisasm(defaultDisasmVa()); return; }
+  const d = state.dis;
+  if (d.main === undefined) {
+    let eng;
+    try { eng = await getEngine(); } catch { openDisasm(defaultDisasmVa()); return; }
+    try { d.main = findMain({ engine: eng, model: m, bytes: state.bytes }); } catch (err) { console.error(err); d.main = null; }
+    if (d.main && (!m.labels.has(d.main.va) || m.labels.get(d.main.va) === 'entry') && !state.notes.name(d.main.va)) {
+      m.labels.set(d.main.va, d.main.name);
+      if (state.fnList) drawFunctions();
+    }
+  }
+  if (!d.main) {
+    toast(m.kind === 'DLL' ? 'DLLs have no main function, showing the entry point instead.' : 'Could not find main in this file, showing the entry point instead.');
+    openDisasm(defaultDisasmVa());
+    return;
+  }
+  await openDisasm(d.main.va);
+  toast(`${funcName(d.main.va)} at ${hx(d.main.va)}, found ${MAIN_HOW[d.main.how]}.`);
+}
 $('#disMore').addEventListener('click', () => { if (state.dis.next != null) appendDisasm(state.dis.next, 300); });
 $('#disGraph').addEventListener('click', () => openGraph(defaultGraphVa()));
 
@@ -2221,6 +2255,7 @@ function paletteItems(q) {
       ...(m.disasm && !state.code && !state.codeRun.running ? [{ label: 'Analyze code (find functions and xrefs)', run: () => { selectTab('functions'); runCodeAnalysis(); } }] : []),
       { label: 'Run YARA rules', run: () => { selectTab('yara'); runYaraNow(); } },
       { label: 'Go to entry point', run: () => openDisasm(defaultDisasmVa()) },
+      ...(m.disasm ? [{ label: 'Jump to main', run: () => jumpToMain() }] : []),
       ...$$('#tabs [data-tab]').filter((b) => !b.hidden).map((b) => ({ label: `Go to ${TAB_NAMES[b.dataset.tab]}`, run: () => selectTab(b.dataset.tab) })),
     ] : []),
   ];
@@ -2433,6 +2468,11 @@ document.addEventListener('keydown', (e) => {
   if (e.key === ' ' && document.activeElement?.tagName !== 'BUTTON' && (state.tab === 'disasm' || state.tab === 'graph') && state.model.disasm) {
     e.preventDefault();
     if (state.tab === 'disasm') openGraph(defaultGraphVa()); else graphToListing();
+    return;
+  }
+  if ((e.key === 'm' || e.key === 'M') && (state.tab === 'disasm' || state.tab === 'graph') && state.model.disasm) {
+    e.preventDefault();
+    jumpToMain();
     return;
   }
   if (state.tab !== 'disasm' || state.dis.sel == null) return;

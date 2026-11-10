@@ -132,6 +132,7 @@
       <h2>6. Disassembly</h2>
       <img class="shot" src="assets/screenshots/disasm.png" alt="binkeep disassembly view with addresses, bytes, mnemonics and clickable branch targets" width="1440" height="900" loading="lazy">
       <p>The disassembler is <a href="https://www.capstone-engine.org">Capstone</a> compiled to WebAssembly. Calls through the import table are named (for example <code>call CreateRemoteThread</code>), string references show the string inline, and branch targets are links you can follow. <b>Back</b> returns to where you were.</p>
+      <p>The entry point of most programs is startup code added by the compiler, not code the author wrote. <b>Jump to main</b> (or <kbd class="kbd">M</kbd>) skips it and opens the program's own <code>main</code>: it follows the MSVC and MinGW startup code, reads the address glibc passes to <code>__libc_start_main</code>, uses <code>LC_MAIN</code> on macOS, and finds <code>main.main</code> in the function table of Go programs, even stripped ones.</p>
       <p>Type an address or a function name in the address box and press <b>Go</b>. Click a line to select it, then press <kbd class="kbd">N</kbd> to rename the function, <kbd class="kbd">;</kbd> to add a comment, or <kbd class="kbd">X</kbd> to list cross-references. Names and comments are saved in your browser for that exact file (by its SHA-256) and appear everywhere in the app.</p>
     </section>
 
@@ -175,6 +176,7 @@ rule suspicious_injection
         <tbody>
           <tr><td><kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">K</kbd> or <kbd class="kbd">/</kbd></td><td>Search functions, imports, symbols, strings, addresses and actions</td></tr>
           <tr><td><kbd class="kbd">G</kbd></td><td>Go to an address</td></tr>
+          <tr><td><kbd class="kbd">M</kbd></td><td>Jump to the program's main function</td></tr>
           <tr><td><kbd class="kbd">N</kbd></td><td>Rename the selected function (disassembly)</td></tr>
           <tr><td><kbd class="kbd">;</kbd></td><td>Comment the selected line (disassembly)</td></tr>
           <tr><td><kbd class="kbd">X</kbd></td><td>Cross-references to the selected line or function</td></tr>
