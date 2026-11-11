@@ -97,6 +97,7 @@
     </a>
     <div class="file-meta" id="fileMeta" hidden>
       <span class="file-icon" id="fileIcon" hidden></span>
+      <button class="btn archive-back" type="button" id="archiveBack" hidden title="Back to the archive this file came from"></button>
       <span class="file-name" id="fileName"></span>
       <span class="chip" id="fileFormat"></span>
     </div>
@@ -140,16 +141,19 @@
     <section class="empty" id="emptyState">
       <div class="hero">
         <span class="emblem" aria-hidden="true"><svg viewBox="289 373 688 513"><path d="M297 373H824L975 524L876 625L977 726L820 886H324L437 774H774L820 728L774 681H397V722L289 827V583H750L811 522L775 486H410Z"/></svg></span>
-        <span class="eyebrow"><span class="dot" aria-hidden="true"></span>PE, ELF and Mach-O. 100% in your browser.</span>
+        <span class="eyebrow"><span class="dot" aria-hidden="true"></span>PE, ELF, Mach-O, .NET and Android. 100% in your browser.</span>
         <h1><span class="grad">See inside any binary.</span></h1>
         <p>A free online disassembler and binary analysis tool. Drop an executable and get headers, functions, xrefs, strings, YARA matches and disassembly in seconds. Nothing is uploaded.</p>
       </div>
       <label class="dropzone" for="fileInput" id="dropzone">
         <span class="lens" aria-hidden="true"></span>
         <span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></span>
-        <strong>Drop an .exe, .dll, .so, .dylib or any binary</strong>
+        <strong>Drop an .exe, .dll, .so, .dylib, .apk, .zip or any binary</strong>
         <span>or click to browse. Works offline, with files up to 512 MB.</span>
       </label>
+      <div class="try-row">
+        <button class="btn" type="button" id="installBtn" hidden>Install as an app</button>
+      </div>
       <ul class="pitch">
         <li>
           <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
@@ -180,6 +184,7 @@
         <h2 id="aboutTitle">Reverse engineering in the browser</h2>
         <p>binkeep is a web-based reverse engineering tool for the first look at an unknown binary. It parses Windows PE files (.exe, .dll, .sys), Linux ELF files (.so and executables) and macOS Mach-O files (including universal binaries) directly in the page, with no install and no upload.</p>
         <p>It finds functions with a full linear sweep, builds cross-references for calls, jumps, imports and strings, and disassembles x86, x64, ARM and ARM64 code with Capstone compiled to WebAssembly. Real libyara runs your YARA rules locally. It also detects packers such as UPX, Themida and VMProtect, and recomputes Authenticode digests to show whether a signed file was modified.</p>
+        <p>It also reads .NET assemblies (types, methods, framework calls, user strings), Android APK and DEX files (manifest, permissions, components, classes) and ZIP archives, including password-protected malware samples. A capabilities view lists what a file can do, such as keylogging, persistence or process injection, mapped to MITRE ATT&amp;CK techniques.</p>
         <p>It is free and open source, works offline once loaded, and is built for malware triage, CTF challenges and quick checks before you reach for Ghidra or IDA.</p>
       </section>
       <p class="foot"><svg viewBox="289 373 688 513" aria-hidden="true"><path d="M297 373H824L975 524L876 625L977 726L820 886H324L437 774H774L820 728L774 681H397V722L289 827V583H750L811 522L775 486H410Z"/></svg>binkeep &middot; press <kbd class="kbd">Ctrl K</kbd> anytime &middot; <a href="guide.html">Guide</a> &middot; <a href="https://github.com/kano92-dir/binkeep">GitHub</a></p>
@@ -191,6 +196,8 @@
     </section>
 
     <section class="report" id="shared" hidden></section>
+
+    <section class="report archive" id="archive" hidden></section>
 
     <section class="report" id="report" hidden>
       <div class="card brief" id="brief"></div>
@@ -211,6 +218,9 @@
       <nav class="tabs" role="tablist" aria-label="Report sections" id="tabs">
         <span class="tab-lens" id="tabLens" aria-hidden="true"></span>
         <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+        <button role="tab" data-tab="dotnet" hidden>.NET</button>
+        <button role="tab" data-tab="android" hidden>Android</button>
+        <button role="tab" data-tab="files" hidden>Files</button>
         <button role="tab" data-tab="sections">Sections</button>
         <button role="tab" data-tab="imports">Imports</button>
         <button role="tab" data-tab="exports">Symbols</button>
@@ -226,6 +236,9 @@
       </nav>
 
       <div class="panel" role="tabpanel" data-panel="overview"></div>
+      <div class="panel" role="tabpanel" data-panel="dotnet" hidden></div>
+      <div class="panel" role="tabpanel" data-panel="android" hidden></div>
+      <div class="panel" role="tabpanel" data-panel="files" hidden></div>
       <div class="panel" role="tabpanel" data-panel="sections" hidden></div>
       <div class="panel" role="tabpanel" data-panel="imports" hidden></div>
       <div class="panel" role="tabpanel" data-panel="exports" hidden></div>

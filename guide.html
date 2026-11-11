@@ -92,7 +92,7 @@
     <section id="open">
       <h2>1. Open a file</h2>
       <p>Go to <a href="./">the app</a> and drop a file on the page, or click <b>Open file</b>. Any file works. Executables get the full analysis, and everything else still gets hex, strings, entropy and YARA. Files up to 512 MB are supported.</p>
-      <p>The file is read with the browser's File API and parsed in the page. There is no server side: the app is a set of static files, and after the first visit it is cached so it opens without a network connection. You can also install it as an app from the browser menu.</p>
+      <p>The file is read with the browser's File API and parsed in the page. There is no server side: the app is a set of static files, and after the first visit it is cached so it opens without a network connection. You can also install it as an app from the browser menu. On Android, the installed app appears in the share menu, so a file you just downloaded can be sent straight to binkeep.</p>
     </section>
 
     <section id="formats">
@@ -101,6 +101,9 @@
         <li><b>Windows PE</b>: PE32 and PE32+ executables, DLLs and drivers (.exe, .dll, .sys), including .NET assemblies.</li>
         <li><b>Linux ELF</b>: 32 and 64 bit, little and big endian (executables, .so libraries, object files).</li>
         <li><b>macOS and iOS Mach-O</b>: 32 and 64 bit, plus universal (fat) binaries. For a universal binary, the arm64 slice is analyzed first, then x86_64.</li>
+        <li><b>.NET assemblies</b>: the <b>.NET</b> tab lists every type and method, the referenced assemblies, the framework calls the code makes (such as <code>WebClient.DownloadString</code> or <code>Assembly.Load</code>), P/Invoke imports, embedded resources and the user strings. Known obfuscators are named.</li>
+        <li><b>Android APK and DEX</b>: the package, version and SDK levels, the permissions it asks for (sensitive ones highlighted), its activities, services and receivers with the exported ones marked, the classes grouped by package, and the signing scheme, including whether it was signed with the Android debug key. The <b>Files</b> tab lists everything inside; native libraries (<code>lib/*/*.so</code>) open as ELF files with full disassembly.</li>
+        <li><b>ZIP archives</b>: pick a file inside to analyze it. Password-protected archives (ZipCrypto and AES) are supported, and the usual sample passwords such as <code>infected</code> are tried automatically.</li>
       </ul>
       <p>The disassembler supports x86, x64, ARM and ARM64.</p>
     </section>
@@ -111,6 +114,8 @@
       <p>The top row shows the format, architecture, size, overall entropy, the number of flagged API imports and the number of functions found.</p>
       <p>The <b>entropy graph</b> plots how random each block of the file is, with section bands underneath. Normal code sits around 5 to 6.5 bits per byte. Long stretches near 8 usually mean compressed or encrypted data, which is common in packed malware, installers and embedded resources. Click anywhere on the graph to open that offset in the hex view.</p>
       <p><b>Headers</b> list the entry point, image base, compile time, subsystem, linked libraries and, for Mach-O, the platform and SDK. <b>Things to check</b> collects anything unusual, such as an entry point in a non-executable or unexpected section, or a section that is both writable and executable. A compile time in the future is noted next to the timestamp; it usually means a reproducible build.</p>
+      <p><b>What it can do</b> lists behaviours the code is able to perform, such as logging keystrokes, taking screenshots, starting itself at boot, injecting into other processes, downloading files, or, for Android, reading SMS messages and using accessibility services. Each one is mapped to a <a href="https://attack.mitre.org/">MITRE ATT&amp;CK</a> technique and shows the evidence: the imported function, the string, the .NET call or the permission it was found from. It is a list of capabilities, not proof that the code runs; behaviours that ordinary software has too are folded away at the bottom.</p>
+      <p>Under <b>Hashes</b>, the lookup buttons open the file's SHA-256 on VirusTotal, MalwareBazaar or Hybrid Analysis. Only the hash is sent, and only when you click.</p>
       <p><b>Security mitigations</b> show which protections the binary was built with: ASLR, DEP and Control Flow Guard for PE; PIE, NX, RELRO, stack canaries and FORTIFY for ELF; PIE, stack canaries, ARC and the hardened runtime for Mach-O.</p>
     </section>
 

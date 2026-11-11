@@ -46,6 +46,7 @@ export function buildReport(s, { full = false } = {}) {
     resources: s.resources ? s.resources.items.filter((x) => x.magic?.level).map((x) => ({ type: x.typeName, name: String(x.name), size: x.size, magic: x.magic.name })) : [],
     functions: s.code ? { count: s.code.functions.length, list: full ? s.code.functions.map((f) => ({ va: hx(f.va), name: fnName(f.va), size: f.size })) : undefined } : null,
     yara: s.yara ? s.yara.rules.map((x) => ({ rule: x.name, matches: x.matches.length })) : null,
+    capabilities: (s.caps || []).filter((c) => !c.weak).map((c) => ({ name: c.name, attack: c.attack, tactic: c.tactic })),
     notes: s.notes ? s.notes.all() : null,
     created: new Date().toISOString(),
   };
@@ -166,6 +167,7 @@ export function normalizeReport(r) {
       list: Array.isArray(fns.list) ? arr(fns.list, 200000).map((f) => ({ va: hexStr(obj(f).va) || '0x0', name: str(obj(f).name, 300), size: Math.max(0, num(obj(f).size)) })) : undefined,
     } : null,
     yara: Array.isArray(r.yara) ? arr(r.yara, 500).map((y) => ({ rule: str(obj(y).rule, 200), matches: Math.max(0, num(obj(y).matches)) })) : null,
+    capabilities: arr(r.capabilities, 80).map((c) => ({ name: str(obj(c).name, 120), attack: /^T\d{4}(\.\d{3})?$/.test(str(obj(c).attack, 12)) ? str(obj(c).attack, 12) : '', tactic: str(obj(c).tactic, 40) })),
     notes: r.notes ? { names: strMap(notes.names, 5000), comments: strMap(notes.comments, 5000) } : null,
   };
 }
@@ -214,6 +216,7 @@ export function reportMarkdown(r) {
     L.push('');
   }
   if (r.functions?.count) L.push(`## Code`, '', `${r.functions.count.toLocaleString('en-US')} functions found.`, '');
+  if (r.capabilities?.length) L.push('## What it can do (MITRE ATT&CK)', '', ...r.capabilities.map((c) => `- ${mdEsc(c.name)}${c.attack ? ` (${c.attack}, ${mdEsc(c.tactic)})` : ''}`), '');
   if (r.yara?.length) L.push('## YARA matches', '', ...r.yara.map((y) => `- ${y.rule} (${y.matches} hits)`), '');
   if (r.strings.length) L.push('## Interesting strings', '', ...r.strings.slice(0, 120).map((s) => `- \`${s.cat}\` ${mdEsc(s.text)}`), '');
   const notes = r.notes;

@@ -935,3 +935,46 @@ button.b-item:hover { background: rgba(255,255,255,0.06); box-shadow: inset 0 0 
   background: rgba(16, 16, 18, 0.97); box-shadow: var(--spec-top), inset 0 0 0 1px var(--glass-edge), 0 16px 36px -12px #000;
   animation: pop 160ms var(--ease);
 }
+
+/* ---------- Capabilities, .NET, Android, archives ---------- */
+.caps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.cap { display: grid; gap: 6px; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.025); box-shadow: inset 0 0 0 1px var(--line); }
+.cap-main { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 14px; }
+.cap-main b { font-weight: 600; color: var(--fg); }
+.cap-main .attack { font-family: var(--mono); text-decoration: none; }
+.cap-main .attack:hover { filter: brightness(1.2); }
+.cap-evs { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; }
+.cap-ev code { color: var(--fg-2); overflow-wrap: anywhere; }
+.caps-weak { margin-top: 12px; }
+.caps-weak summary { cursor: pointer; padding: 4px 0; }
+.caps-weak .caps { margin-top: 8px; opacity: 0.8; }
+#capsCard > .muted.small:last-child { margin: 12px 0 0; }
+.hash-links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.hash-links .btn { min-height: 32px; padding: 0 14px; font-size: 13px; text-decoration: none; }
+.hash-links > .muted:last-child { flex-basis: 100%; }
+.plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.plain-list li { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
+.plain-list li > :first-child { overflow-wrap: anywhere; }
+.plain-list.cols { display: block; columns: 2 360px; column-gap: 28px; max-height: 520px; overflow: auto; }
+.plain-list.cols li { display: block; padding: 2px 0; break-inside: avoid; overflow-wrap: anywhere; }
+.dn-types { display: grid; gap: 2px; max-height: 560px; overflow: auto; }
+.dn-type summary { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 6px 4px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--line); }
+.dn-type summary .mono { overflow-wrap: anywhere; }
+.dn-type ul { padding: 8px 0 10px 22px; }
+.comps li { flex-wrap: wrap; }
+.try-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 14px; margin: -8px auto 0; text-align: center; }
+.archive-back { min-height: 30px; padding: 0 12px; font-size: 12px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
+.archive .card { display: grid; gap: 14px; }
+.archive tr.bin td:first-child { color: var(--fg); }
+.zip-pw { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+.zip-pw input { flex: 1; max-width: 280px; min-height: 38px; padding: 0 14px; border-radius: 12px; border: 0; background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--fg); font: 500 14px var(--mono); }
+.archive table { margin-top: 4px; }
+.archive td .btn { min-height: 30px; padding: 0 14px; font-size: 12px; }
+@media (max-width: 640px) {
+  .archive-back { max-width: 120px; }
+  .plain-list.cols { columns: 1; }
+}
+.hints li > .mono, .hints li > span:last-child { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.comps li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; }
+.comps li > .muted { grid-column: 2; }
+.card .plain-list:not(.cols) { max-height: 440px; overflow: auto; }

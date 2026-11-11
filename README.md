@@ -1,4 +1,4 @@
-**Reverse engineering in your browser.** Drop an executable, get a first look in seconds. binkeep is a free, open source binary analysis tool for PE, ELF and Mach-O: disassembler, functions, cross-references, strings, imports, YARA and packer detection. The file is never uploaded, and after the first visit it works offline.
+**Reverse engineering in your browser.** Drop an executable, get a first look in seconds. binkeep is a free, open source binary analysis tool for PE, ELF, Mach-O, .NET and Android apps: disassembler, functions, cross-references, strings, imports, YARA, packer detection, and a list of what the file can do mapped to MITRE ATT&CK. The file is never uploaded, and after the first visit it works offline.
 
 **Try it: https://kano92-dir.github.io/binkeep/**
 
@@ -14,9 +14,14 @@ It is not a Ghidra replacement. It covers the first part of looking at an unknow
 
 **Formats**
 - PE32 / PE32+ (Windows), ELF32 / ELF64 (Linux, either endianness), Mach-O 32/64 and universal binaries (macOS, iOS)
+- .NET assemblies: types and methods, referenced assemblies, the framework calls the code makes, P/Invoke imports, embedded resources and user strings, plus obfuscator detection
+- Android APK and DEX: manifest (package, SDK levels, permissions, exported components, debuggable, cleartext traffic), classes and packages, risky API references, signing scheme (v1, v2/v3, debug key), and the native libraries inside, each one openable on its own
+- ZIP archives, including password-protected ones (ZipCrypto and AES). The usual sample passwords such as `infected` are tried first
 - Anything else still gets hex, strings, entropy and YARA
 
 **Overview**
+- What it can do: behaviours such as logging keys, taking screenshots, starting at boot, injecting into other processes, downloading files or reading SMS, found from imports, strings, .NET calls and Android permissions, each mapped to a MITRE ATT&CK technique with the evidence
+- Hash lookups: open the file's SHA-256 on VirusTotal, MalwareBazaar or Hybrid Analysis with one click (only the hash is sent, and only when you click)
 - Headers, entry point, compile time, linked libraries, platform and SDK versions
 - Security mitigations: ASLR, DEP, CFG (PE); PIE, NX, RELRO, canary, FORTIFY (ELF); PIE, canary, ARC, hardened runtime (Mach-O)
 - Packer detection: UPX, Themida, VMProtect, ASPack, MPRESS, PECompact, Enigma, .NET obfuscators and more, by section names and byte signatures, plus heuristics (code entropy, import count, entry point placement)
@@ -45,7 +50,7 @@ It is not a Ghidra replacement. It covers the first part of looking at an unknow
 - Share link: the report is compressed into the URL fragment (`#r=...`), which browsers never send to a server. The file itself is never included
 - Export the report as Markdown or JSON
 - Command palette (`Ctrl+K` / `Cmd+K`): jump to any function, import, symbol, string, address or action
-- Installable as an app, works offline
+- Installable as an app, works offline. On Android, the installed app shows up in the share menu, so you can send a downloaded file straight to binkeep
 
 ## Host it yourself
 

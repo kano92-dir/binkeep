@@ -2,9 +2,14 @@ import { isPE, parsePE } from './parsers/pe.js';
 import { isELF, parseELF } from './parsers/elf.js';
 import { isMachO, parseMachO } from './parsers/macho.js';
 import { parseResources, parseAuthenticode, verifyDigest } from './parsers/pe-extra.js';
-import { entropy, entropyBlocks, extractStrings, hashes, flagApi } from './analysis.js';
+import { entropy, entropyBlocks, extractStrings, hashes, flagApi, categorize } from './analysis.js';
 import { createDisassembler, classify, isUnconditionalEnd, operandTarget } from './disasm.js';
 import { findMain } from './findmain.js';
+import { parseDotNet } from './dotnet.js';
+import { detectCapabilities } from './capabilities.js';
+import { isZip, listZip, readEntry, DEFAULT_PASSWORDS } from './zip.js';
+import { isDex, parseDex } from './android.js';
+import { hashLinks, capsCard, dotnetCard, dotnetPanel, loadApk, apkModel, apkStrings, androidCard, androidPanel, filesTable } from './extras.js';
 import { detectPackers } from './packers.js';
 import { analyzeCode, codeSize, decRef } from './codeanalysis.js';
 import { createNotes } from './notes.js';
@@ -55,6 +60,11 @@ const state = {
   fnList: null,
   iconUrl: null,
   tab: 'overview',
+  dotnet: null,
+  apk: null,
+  caps: null,
+  archive: null,
+  parent: null,
   dis: { engine: null, enginePromise: null, history: [], start: null, next: null, items: [], sel: null },
   cfg: { graph: null, layout: null, sel: null, busy: 0, history: [], view: { x: 0, y: 0, k: 1 } },
 };
@@ -144,13 +154,21 @@ function sectionEntropies(model, bytes) {
   }
 }
 
-async function analyze(name, buf) {
+async function analyze(name, buf, opts = {}) {
   const bytes = new Uint8Array(buf);
+  if (!opts.raw && isZip(bytes)) {
+    try { return await openZip(name, buf); } catch (err) { console.error(err); }
+  }
+  if (!opts.raw && isDex(bytes)) {
+    try { opts = { ...opts, apk: dexOnly(bytes) }; } catch (err) { console.error(err); }
+  }
   state.codeRun.ctrl?.abort();
   Object.assign(state, {
     name, bytes, hexSel: null, hashes: null, code: null, yara: null, compare: null,
     packing: null, resources: null, signature: null,
+    dotnet: null, apk: opts.apk || null, caps: null, parent: opts.parent || null,
   });
+  $('#archive').hidden = true;
   state.codeRun = { ctrl: null, running: false };
   state.notes.reset();
   if (state.iconUrl) { URL.revokeObjectURL(state.iconUrl); state.iconUrl = null; }
@@ -160,6 +178,13 @@ async function analyze(name, buf) {
   showLoading('Parsing headers...');
   await tick();
   const model = parseAny(bytes);
+  if (state.apk) {
+    apkModel(state.apk, model);
+    if (!state.apk.entries.length) { model.format = 'Android DEX'; model.kind = 'Android bytecode'; model.facts[0] = ['Format', 'Android DEX']; }
+  }
+  if (model.pe) {
+    try { state.dotnet = parseDotNet(bytes, model); } catch (err) { console.error(err); }
+  }
   sectionEntropies(model, bytes);
   state.model = model;
 
@@ -167,11 +192,16 @@ async function analyze(name, buf) {
   await tick();
   state.blocks = entropyBlocks(bytes, 1200);
   state.totalEntropy = entropy(bytes);
-  state.strings = extractStrings(bytes);
+  state.strings = state.apk ? apkStrings(state.apk) : extractStrings(bytes);
+  if (state.dotnet) {
+    const seen = new Set(state.strings.map((x) => x.text));
+    for (const t of state.dotnet.userStrings) if (t.length >= 4 && !seen.has(t)) { seen.add(t); state.strings.push({ text: t, off: -1, len: 0, enc: '.NET', cat: categorize(t) }); }
+  }
   state.stringByOff = new Map(state.strings.map((s) => [s.off, s]));
   const lang = detectToolchain(model, state.strings);
   if (lang) model.hints.unshift({ level: 'info', text: lang });
   state.packing = detectPackers(bytes, model, state.strings);
+  try { state.caps = detectCapabilities({ model, strings: state.strings, dotnet: state.dotnet, apk: state.apk }); } catch (err) { console.error(err); state.caps = []; }
   if (model.pe) {
     try { state.resources = parseResources(bytes, model); } catch (err) { console.error(err); }
     try { state.signature = parseAuthenticode(bytes, model); } catch (err) { console.error(err); }
@@ -188,6 +218,15 @@ async function analyze(name, buf) {
   renderFileIcon();
 
   $('[data-tab="resources"]').hidden = !state.resources?.items.length;
+  $('[data-tab="dotnet"]').hidden = !state.dotnet;
+  $('[data-tab="android"]').hidden = !state.apk;
+  $('[data-tab="files"]').hidden = !state.apk?.entries.length;
+  $('[data-panel="dotnet"]').innerHTML = state.dotnet ? dotnetPanel(state.dotnet) : '';
+  $('[data-panel="android"]').innerHTML = state.apk ? androidPanel(state.apk) : '';
+  $('[data-panel="files"]').innerHTML = state.apk?.entries.length ? `<div class="card"><div class="card-head"><h2>Files in this app</h2><span class="muted small">${state.apk.entries.length.toLocaleString()} files · open native libraries and DEX files on their own</span></div>${filesTable(state.apk.entries)}</div>` : '';
+  const back = $('#archiveBack');
+  back.hidden = !state.parent;
+  if (state.parent) back.textContent = `\u2190 ${state.parent.name}`;
   $('[data-tab="diff"]').hidden = true;
   $('[data-panel="diff"]').innerHTML = '';
 
@@ -320,6 +359,17 @@ function renderSummary() {
     ['Flagged APIs', String(flagged), flagged > 10 ? 'warn' : ''],
     ['Functions', fnCount],
   ];
+  const nCaps = (state.caps || []).filter((c) => !c.weak).length;
+  if (state.apk) {
+    stats.splice(3, 3,
+      ['Classes', state.apk.classes.length.toLocaleString()],
+      ['Permissions', String(state.apk.permissions.length), state.apk.manifest?.dangerous.length ? 'warn' : ''],
+      ['Behaviours', String(nCaps), nCaps ? 'warn' : '']);
+  } else if (state.dotnet) {
+    stats.splice(4, 2, ['.NET types', state.dotnet.counts.types.toLocaleString()], ['Behaviours', String(nCaps), nCaps ? 'warn' : '']);
+  } else {
+    stats.splice(4, 1, ['Behaviours', String(nCaps), nCaps > 3 ? 'warn' : '']);
+  }
   $('#summary').innerHTML = stats.map(([k, v, cls]) => `<dl class="stat"><dt>${k}</dt><dd class="${cls || ''}">${esc(v)}</dd></dl>`).join('');
   applyTips($('#summary'));
 }
@@ -386,6 +436,10 @@ function briefItems() {
   const caps = Object.entries(CAPS).filter(([c]) => cats.has(c));
   for (const [, [lv, text]] of caps) items.push({ lv, text, tab: 'imports' });
   if (m.imports.length && !caps.length) items.push({ lv: 'ok', text: 'No risky-looking imports', tab: 'imports' });
+  const strong = (state.caps || []).filter((c) => !c.weak);
+  const BAD = /Collection|Credential|Impact|Exfiltration/;
+  const covered = (x) => (cats.has('keyboard') && /keystrokes/.test(x.name)) || (cats.has('injection') && /Inject|Hollow/.test(x.name));
+  for (const c of strong.filter((x) => (BAD.test(x.tactic) || /Inject|Hollow|bypass|Defender/.test(x.name)) && !covered(x)).slice(0, 4)) items.push({ lv: 'bad', text: c.name, sub: `MITRE ATT&CK ${c.attack}`, tab: 'overview', caps: 1 });
   // Addresses inside
   const urls = new Set(), ips = new Set();
   for (const s of state.strings) {
@@ -407,9 +461,35 @@ function briefItems() {
   return items;
 }
 
+function apkBriefItems() {
+  const a = state.apk, man = a.manifest || {};
+  const items = [];
+  if (a.sig.debugKey) items.push({ lv: 'warn', text: 'Signed with the Android debug key', sub: 'A development build. Apps from a store are signed with the developer\'s own key.' });
+  else if (a.sig.v1.length || a.sig.v2) items.push({ lv: 'ok', text: 'Signed by its developer' });
+  else if (a.entries.length) items.push({ lv: 'warn', text: 'Not signed', sub: 'Android will not install it as is.' });
+  if (man.app?.debuggable) items.push({ lv: 'warn', text: 'Debugging is switched on', sub: 'Normal for test builds, unusual for released apps.' });
+  const d = man.dangerous || [];
+  if (d.length) items.push({ lv: d.length > 4 ? 'bad' : 'warn', text: `Asks for ${d.length} sensitive permission${d.length > 1 ? 's' : ''}`, sub: d.slice(0, 5).map((x) => x.replace(/^android\.permission\./, '')).join(', '), tab: 'overview' });
+  else if (man.permissions) items.push({ lv: 'ok', text: 'No sensitive permissions' });
+  for (const c of (state.caps || []).filter((x) => !x.weak).slice(0, 4)) items.push({ lv: /Collection|Credential/.test(c.tactic) ? 'bad' : 'warn', text: c.name, sub: `MITRE ATT&CK ${c.attack}`, tab: 'overview', caps: 1 });
+  const urls = new Set(state.strings.filter((x) => x.cat === 'url').map((x) => x.text));
+  if (urls.size) items.push({ lv: 'info', text: `Contains ${urls.size} web address${urls.size > 1 ? 'es' : ''}`, tab: 'strings', cat: 'url' });
+  if (a.nativeLibs.length) items.push({ lv: 'info', text: `Ships ${a.nativeLibs.length} native librar${a.nativeLibs.length > 1 ? 'ies' : 'y'}`, sub: 'Open them from the Files tab to disassemble.', tab: 'files' });
+  const y = state.yara;
+  items.push(y ? (y.rules.length ? { lv: 'bad', text: `${y.rules.length} YARA rule${y.rules.length > 1 ? 's' : ''} matched`, tab: 'yara' } : { lv: 'ok', text: 'None of your YARA rules matched', tab: 'yara' }) : { lv: 'idle', text: 'Check against YARA rules', tab: 'yara' });
+  return items;
+}
+
 function renderBrief() {
   const m = state.model;
   const el = $('#brief');
+  if (state.apk) {
+    const man = state.apk.manifest;
+    const head = man ? `Android app${man.package ? ` · ${man.package}` : ''}` : 'Android bytecode (DEX)';
+    el.innerHTML = briefHtml(head, `${m.arch} · ${fmtSize(state.bytes.length)}`, apkBriefItems());
+    applyTips(el);
+    return;
+  }
   if (!m.disasm && !m.pe && !m.macho && !m.format.startsWith('ELF')) {
     el.innerHTML = `<div class="brief-head"><span class="brief-kicker">Quick read</span><h3>Not a program file binkeep can read</h3><p class="muted">Detected as ${esc(m.format)}. The hex view and strings still work.</p></div>`;
     applyTips(el);
@@ -418,18 +498,22 @@ function renderBrief() {
   const platform = m.pe ? 'Windows' : m.macho ? 'macOS' : 'Linux';
   const bits = m.bits || (/64/.test(m.arch) ? 64 : 32);
   const headline = `${bits}-bit ${platform} ${plainKind()}`;
+  el.innerHTML = briefHtml(headline, `${m.arch} · ${fmtSize(state.bytes.length)}`, briefItems());
+}
+
+function briefHtml(headline, subline, list) {
   const icon = { ok: '<polyline points="20 6 9 17 4 12"/>', warn: '<line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.5"/>', bad: '<line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12" y2="16.5"/>', info: '<line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="7.5" x2="12" y2="7.5"/>', idle: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/>' };
-  const items = briefItems().map((it) => {
-    const attrs = it.tab ? ` data-tab-link="${it.tab}"${it.cat ? ` data-strcat="${it.cat}"` : ''}` : '';
+  const items = list.map((it) => {
+    const attrs = it.tab ? ` data-tab-link="${it.tab}"${it.cat ? ` data-strcat="${it.cat}"` : ''}${it.caps ? ' data-caps="1"' : ''}` : '';
     const tag = it.tab ? 'button type="button"' : 'div';
     const end = it.tab ? 'button' : 'div';
     return `<li class="b-${it.lv}"><${tag} class="b-item"${attrs}><span class="b-ico"><svg viewBox="0 0 24 24" aria-hidden="true">${icon[it.lv]}</svg></span><span class="b-text"><b>${esc(it.text)}</b>${it.sub ? `<span>${esc(it.sub)}</span>` : ''}</span></${end}></li>`;
   }).join('');
-  el.innerHTML = `
+  return `
     <div class="brief-head">
       <span class="brief-kicker">Quick read</span>
       <h3>${esc(headline)}</h3>
-      <p class="muted">${esc(m.arch)} · ${fmtSize(state.bytes.length)}</p>
+      <p class="muted">${esc(subline)}</p>
     </div>
     <ul class="brief-list">${items}</ul>
     <p class="muted small brief-note">A quick read of how the file is built, not a verdict. Normal software does many of these things too. Hover or tap the underlined words to learn what they mean.</p>`;
@@ -456,6 +540,11 @@ const TIPS = {
   Format: 'The file format. PE is Windows, ELF is Linux, Mach-O is macOS and iOS.',
   Architecture: 'The kind of processor the code runs on. x86-64 is a normal 64-bit PC, ARM64 is phones and Apple Silicon Macs.',
   Entropy: 'How random the bytes look, from 0 to 8. Normal code sits around 5 to 6.5. Close to 8 usually means compressed or encrypted data.',
+  Behaviours: 'Things the code is able to do, such as logging keys or starting itself at boot, found from its imports and strings. Each one is mapped to a MITRE ATT&CK technique.',
+  'What it can do': 'Behaviours found from what the file imports, references and contains, mapped to MITRE ATT&CK, the shared catalogue of attacker techniques.',
+  '.NET types': 'Classes and other types defined in this .NET assembly.',
+  Classes: 'Java or Kotlin classes compiled into the app (DEX bytecode).',
+  Permissions: 'What the Android app asks to access. Sensitive ones cover messages, contacts, location, the camera, the screen and other apps.',
   'Flagged APIs': 'Imported functions that malware often uses, such as writing into other programs. Normal software uses many of them too.',
   Functions: 'How many separate pieces of code were found in the program.',
   'Things to check': 'Odd details in the file headers that are worth a second look.',
@@ -562,7 +651,12 @@ function renderOverview() {
     ? `<div class="ident">${state.iconUrl ? `<img src="${state.iconUrl}" alt="">` : ''}<div><b>${esc(verStr('FileDescription') || verStr('ProductName'))}</b><span class="muted small">${esc([verStr('CompanyName'), ver.fileVersion || verStr('FileVersion')].filter(Boolean).join(' · '))}</span></div></div>`
     : '';
 
+  const extra = state.dotnet ? dotnetCard(state.dotnet) : state.apk?.manifest ? androidCard(state.apk) : '';
   $('[data-panel="overview"]').innerHTML = `
+    <div class="${extra ? 'grid-2' : ''}">
+      <div class="card" id="capsCard">${capsCard(state.caps)}</div>
+      ${extra ? `<div class="card">${extra}</div>` : ''}
+    </div>
     <div class="grid-2">
       <div class="card">${ident}<div class="card-head"><h2>Headers</h2></div><dl class="facts">${facts}</dl></div>
       <div class="card" style="display:grid;gap:16px;align-content:start">
@@ -656,7 +750,7 @@ function renderHashes() {
   el.style.display = 'grid';
   el.style.gap = '8px';
   el.innerHTML = Object.entries(state.hashes).map(([k, v]) => `
-    <div class="hash-row"><span class="muted">${k}</span><code>${v}</code><button class="btn copy" data-copy="${v}">Copy</button></div>`).join('');
+    <div class="hash-row"><span class="muted">${k}</span><code>${v}</code><button class="btn copy" data-copy="${v}">Copy</button></div>`).join('') + hashLinks(state.hashes['SHA-256']);
 }
 
 function renderNotesCard() {
@@ -1005,10 +1099,9 @@ function drawStrings() {
     render(i) {
       const s = list[i];
       const row = document.createElement('div');
-      row.dataset.hex = s.off;
-      row.dataset.len = s.len;
-      const refs = strRefs(s);
-      row.innerHTML = `<span class="s-off">${hxPad(s.off)}</span><span class="s-enc">${s.enc}</span><span class="s-cat">${s.cat ? `<span class="chip info">${s.cat}</span>` : ''}</span><span class="s-refs">${refs ? `<button class="refs" type="button" data-strref="${s.off}">${refs.length} ref${refs.length > 1 ? 's' : ''}</button>` : ''}</span><span class="s-text">${esc(s.text)}</span>`;
+      if (s.off >= 0) { row.dataset.hex = s.off; row.dataset.len = s.len; }
+      const refs = s.off >= 0 ? strRefs(s) : null;
+      row.innerHTML = `<span class="s-off">${s.off >= 0 ? hxPad(s.off) : '-'}</span><span class="s-enc">${s.enc}</span><span class="s-cat">${s.cat ? `<span class="chip info">${s.cat}</span>` : ''}</span><span class="s-refs">${refs ? `<button class="refs" type="button" data-strref="${s.off}">${refs.length} ref${refs.length > 1 ? 's' : ''}</button>` : ''}</span><span class="s-text">${esc(s.text)}</span>`;
       return row;
     },
   });
@@ -2523,3 +2616,132 @@ if ('launchQueue' in window) {
 // Test hook: window.binkeep.analyze(name, arrayBuffer)
 window.binkeep = { analyze, state, compareWith, runCodeAnalysis };
 window.binpeek = window.binkeep;
+
+
+/* ---------- Archives (ZIP, APK) ---------- */
+
+function dexOnly(bytes) {
+  const d = parseDex(bytes);
+  return {
+    manifest: null, dexes: [{ name: 'classes.dex', version: d.version, classes: d.classes.length, methods: d.methodRefs.length }],
+    classes: d.classes, methodRefs: [...new Set(d.methodRefs)], strings: d.strings.filter((x) => x.length >= 4 && !/^[LV\[][\w/$]*;?$/.test(x)),
+    entries: [], nativeLibs: [], sig: { v1: [], v2: false, debugKey: false }, permissions: [],
+  };
+}
+
+async function openZip(name, buf) {
+  const bytes = new Uint8Array(buf);
+  showLoading('Reading the archive...');
+  await tick();
+  const entries = listZip(bytes);
+  if (entries.some((e) => e.name === 'AndroidManifest.xml') && entries.some((e) => /^classes\d*\.dex$/.test(e.name))) {
+    showLoading('Reading the Android app...');
+    await tick();
+    const apk = await loadApk(bytes, entries);
+    return analyze(name, buf, { raw: true, apk });
+  }
+  state.archive = { name, buf, bytes, entries, apk: null };
+  const bins = entries.filter((e) => !/\.(txt|md|html?|url|ini|nfo|jpe?g|png|gif|pdf)$/i.test(e.name));
+  if (bins.length === 1) return openZipEntry(state.archive, entries.indexOf(bins[0]));
+  showArchive(state.archive);
+}
+
+function showArchive(arc, message = '') {
+  state.archive = arc;
+  $('#loadingState').hidden = true;
+  $('#emptyState').hidden = true;
+  $('#report').hidden = true;
+  $('#shared').hidden = true;
+  $('#fileMeta').hidden = true;
+  $$('.report-only').forEach((x) => { x.hidden = true; });
+  const locked = arc.entries.some((e) => e.encrypted);
+  const el = $('#archive');
+  el.hidden = false;
+  el.innerHTML = `<div class="card">
+      <div class="card-head"><h2>${esc(arc.name)}</h2><span class="muted small">ZIP archive · ${arc.entries.length} file${arc.entries.length === 1 ? '' : 's'}</span></div>
+      <p class="muted small">Pick a file to analyze. It is unpacked in this tab, nothing is uploaded.</p>
+      ${locked ? `<label class="zip-pw"><span>Password</span><input id="zipPw" type="text" autocomplete="off" spellcheck="false" placeholder="infected" value="${esc(arc.password || '')}"></label>
+      <p class="muted small">Encrypted files are tried with the usual sample passwords (infected, malware, virus) first.</p>` : ''}
+      ${message ? `<div class="error-box">${esc(message)}</div>` : ''}
+      ${filesTable(arc.entries)}
+    </div>`;
+  document.title = `${arc.name} · binkeep`;
+}
+
+async function openZipEntry(arc, i) {
+  const e = arc.entries[i];
+  if (!e) return;
+  showLoading(`Unpacking ${e.name}...`);
+  await tick();
+  const typed = $('#zipPw')?.value.trim() || arc.password || '';
+  const tries = e.encrypted ? [...new Set([typed, ...DEFAULT_PASSWORDS].filter(Boolean))] : [''];
+  let out = null, lastErr = null;
+  for (const pw of tries) {
+    try { out = await readEntry(arc.bytes, e, pw); arc.password = pw; break; } catch (err) { lastErr = err; if (err.code !== 'password') break; }
+  }
+  if (!out) {
+    const msg = lastErr?.code === 'password' ? (typed ? 'Wrong password for this file.' : 'This file is password protected. Type the password above, then open it again.') : `Could not unpack ${e.name}: ${lastErr?.message || 'unknown error'}`;
+    if (arc.apk) { toast(msg); selectTab('files'); $('#loadingState').hidden = true; $('#report').hidden = false; return; }
+    showArchive(arc, msg);
+    setTimeout(() => $('#zipPw')?.focus(), 50);
+    return;
+  }
+  const copy = out.slice().buffer;
+  await analyze(e.name.split('/').pop(), copy, { parent: arc });
+}
+
+$('#archive').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-zip-open]');
+  if (b && state.archive) openZipEntry(state.archive, Number(b.dataset.zipOpen));
+});
+$('[data-panel="files"]').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-zip-open]');
+  if (!b || !state.apk) return;
+  const arc = { name: state.name, buf: state.bytes.buffer, bytes: state.bytes, entries: state.apk.entries, apk: state.apk };
+  openZipEntry(arc, Number(b.dataset.zipOpen));
+});
+$('#archiveBack').addEventListener('click', () => {
+  const p = state.parent;
+  if (!p) return;
+  if (p.apk) analyze(p.name, p.buf, { raw: true, apk: p.apk });
+  else showArchive(p);
+});
+// Quick read rows about behaviours scroll to the capabilities card
+$('#brief').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-caps]')) return;
+  setTimeout(() => $('#capsCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+});
+
+/* ---------- Install, share target ---------- */
+
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installEvt = e;
+  $('#installBtn').hidden = false;
+});
+$('#installBtn').addEventListener('click', async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  await installEvt.userChoice.catch(() => {});
+  installEvt = null;
+  $('#installBtn').hidden = true;
+});
+
+// A file shared to the installed app (Web Share Target) is parked by the
+// service worker in Cache Storage; pick it up and analyze it.
+if (new URLSearchParams(location.search).has('shared') && 'caches' in window) {
+  (async () => {
+    try {
+      const c = await caches.open('binkeep-share');
+      const r = await c.match('shared-file');
+      if (!r) return;
+      const name = decodeURIComponent(r.headers.get('x-name') || 'shared-file');
+      const buf = await r.arrayBuffer();
+      await c.delete('shared-file');
+      history.replaceState(null, '', location.pathname);
+      showLoading(`Reading ${name}...`);
+      await analyze(name, buf);
+    } catch (err) { console.error(err); }
+  })();
+}
